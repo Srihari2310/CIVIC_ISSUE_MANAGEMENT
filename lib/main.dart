@@ -9,19 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 void main() {
-  FlutterError.onError = (FlutterErrorDetails details) {
-    print('[CIVIC_APP][FLUTTER_ERROR] ${details.exceptionAsString()}');
-    print(details.stack?.toString() ?? 'No stack trace');
-    FlutterError.presentError(details);
-  };
-
-  runZonedGuarded(() => runApp(const CivicIssueApp()), (
-    Object error,
-    StackTrace stack,
-  ) {
-    print('[CIVIC_APP][UNCAUGHT] $error');
-    print(stack.toString());
-  });
+  runApp(const CivicIssueApp());
 }
 
 class CivicIssueApp extends StatelessWidget {
@@ -70,22 +58,21 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   DateTime? _capturedAt;
   bool _isSubmitting = false;
   String? _lastSentJson;
-  final List<String> _runtimeLogs = <String>[];
 
-  void _log(String message) {
-    final String line = '[CIVIC_APP] $message';
-    print(line);
+  @override
+  void initState() {
+    super.initState();
+    _serverUrlController.addListener(_onServerUrlChanged);
+  }
+
+  void _onServerUrlChanged() {
     if (!mounted) return;
-    setState(() {
-      _runtimeLogs.insert(0, line);
-      if (_runtimeLogs.length > 40) {
-        _runtimeLogs.removeLast();
-      }
-    });
+    setState(() {});
   }
 
   @override
   void dispose() {
+    _serverUrlController.removeListener(_onServerUrlChanged);
     _descriptionController.dispose();
     _serverUrlController.dispose();
     super.dispose();
@@ -93,13 +80,11 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      _log('Starting image capture from ${source.name}.');
       final XFile? image = await _picker.pickImage(
         source: source,
         imageQuality: 80,
       );
       if (image == null) {
-        _log('Image selection cancelled by user.');
         return;
       }
 
@@ -108,14 +93,8 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
         _capturedAt = DateTime.now();
       });
 
-      _log(
-        'Image captured successfully. path=${image.path}, time=${_capturedAt!.toIso8601String()}',
-      );
-
       await _captureLocation();
-    } catch (error, stack) {
-      _log('Exception while capturing image: $error');
-      _log(stack.toString());
+    } catch (error) {
       _showMessage('Image capture failed: $error');
     }
   }
@@ -123,7 +102,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   Future<void> _captureLocation() async {
     final bool enabled = await Geolocator.isLocationServiceEnabled();
     if (!enabled) {
-      _log('Location services are disabled.');
       _showMessage('Location services are turned off.');
       return;
     }
@@ -135,7 +113,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      _log('Location permission denied: $permission');
       _showMessage('Location permission is required to attach issue location.');
       return;
     }
@@ -148,18 +125,15 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     setState(() {
       _position = position;
     });
-    _log(
-      'Location captured successfully. latitude=${position.latitude}, longitude=${position.longitude}',
-    );
   }
 
-  Future<Map<String, dynamic>> _buildPayload() async {
+  Future<Map<String, dynamic>> _buildPayload(String description) async {
     final DateTime reportTime = _capturedAt ?? DateTime.now();
     final List<int> imageBytes = await File(_selectedImage!.path).readAsBytes();
 
-    final Map<String, dynamic> payload = <String, dynamic>{
+    return <String, dynamic>{
       'issueType': _selectedIssue,
-      'description': _descriptionController.text.trim(),
+      'description': description,
       'timestamp': reportTime.toIso8601String(),
       'timestampDisplay': DateFormat('dd MMM yyyy, hh:mm a').format(reportTime),
       'location': _position == null
@@ -176,15 +150,16 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       'status': 'submitted_to_authority',
       'source': 'flutter_mobile_app',
     };
-    _log(
-      'Payload prepared. issueType=$_selectedIssue, timestamp=${payload['timestamp']}, location=${payload['location']}, description="${_descriptionController.text.trim()}"',
-    );
-    return payload;
   }
 
   String _healthUrlFromReportUrl(String reportUrl) {
     final Uri uri = Uri.parse(reportUrl);
     return uri.replace(path: '/health', query: '').toString();
+  }
+
+  String _dashboardUrlFromReportUrl(String reportUrl) {
+    final Uri uri = Uri.parse(reportUrl);
+    return uri.replace(path: '/', query: '').toString();
   }
 
   bool _isValidServerUrl(String value) {
@@ -208,7 +183,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     }
 
     final String healthUrl = _healthUrlFromReportUrl(reportUrl);
-    _log('Testing server connection at $healthUrl');
 
     try {
       final http.Response response = await http
@@ -221,33 +195,28 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
           'Server reachable but unhealthy (${response.statusCode}).',
         );
       }
-      _log(
-        'Connection test completed. statusCode=${response.statusCode}, body=${response.body}',
-      );
-    } on TimeoutException catch (error) {
-      _log('Connection test timeout: $error');
+    } on TimeoutException {
       _showMessage(
         'Connection timed out. Check server running, IP, Wi-Fi, and firewall port 8080.',
       );
-    } on SocketException catch (error) {
-      _log('Connection test socket error: $error');
+    } on SocketException {
       _showMessage(
         'Network error. Use desktop LAN IP (not localhost/10.0.2.2 on real phone).',
       );
-    } catch (error, stack) {
-      _log('Connection test error: $error');
-      _log(stack.toString());
+    } catch (error) {
       _showMessage('Connection test failed: $error');
     }
   }
 
   Future<void> _submitComplaint() async {
+    final String trimmedDescription = _descriptionController.text.trim();
+
     if (_selectedImage == null) {
       _showMessage('Please upload a photo of the issue.');
       return;
     }
 
-    if (_descriptionController.text.trim().isEmpty) {
+    if (trimmedDescription.isEmpty) {
       _showMessage('Please add a description of the problem.');
       return;
     }
@@ -269,8 +238,9 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     });
 
     try {
-      _log('Submitting complaint to $serverUrl');
-      final Map<String, dynamic> payload = await _buildPayload();
+      final Map<String, dynamic> payload = await _buildPayload(
+        trimmedDescription,
+      );
       final String payloadJson = const JsonEncoder.withIndent(
         '  ',
       ).convert(payload);
@@ -290,49 +260,37 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       if (!mounted) return;
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        _log(
-          'Complaint submitted successfully. statusCode=${response.statusCode}, response=${response.body}',
-        );
         _showMessage('Complaint sent to authority server successfully.');
       } else {
-        _log(
-          'Complaint submission failed at server. statusCode=${response.statusCode}, response=${response.body}',
-        );
         _showMessage(
           'Server rejected complaint (${response.statusCode}): ${response.body}',
         );
       }
-    } on TimeoutException catch (error) {
-      _log('Submission timeout: $error');
+    } on TimeoutException {
       _showMessage(
         'Request timed out. Verify server URL, server status, Wi-Fi network, and firewall.',
       );
-    } on SocketException catch (error) {
-      _log('Submission network/socket error: $error');
+    } on SocketException {
       _showMessage(
         'Network error while sending. On real phone use http://<desktop-ip>:8080/report.',
       );
-    } on FormatException catch (error) {
-      _log('Submission URL format error: $error');
+    } on FormatException {
       _showMessage('Invalid URL format. Please check desktop server URL.');
-    } on http.ClientException catch (error) {
-      _log('Submission HTTP client error: $error');
-      _showMessage('HTTP client error: $error');
-    } catch (error, stack) {
-      _log('Exception during complaint submission: $error');
-      _log(stack.toString());
+    } on http.ClientException catch (clientError) {
+      _showMessage('HTTP client error: $clientError');
+    } catch (error) {
       _showMessage('Failed to send complaint: $error');
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isSubmitting = false;
-      });
-      _log('Submit flow completed.');
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
     }
   }
 
   void _showMessage(String message) {
-    _log('UI message: $message');
+    if (!mounted) return;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
@@ -347,6 +305,11 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   String get _timeText {
     final DateTime timestamp = _capturedAt ?? DateTime.now();
     return DateFormat('dd MMM yyyy, hh:mm a').format(timestamp);
+  }
+
+  String get _descriptionPreview {
+    final String value = _descriptionController.text.trim();
+    return value.isEmpty ? 'Not entered yet' : value;
   }
 
   @override
@@ -413,6 +376,11 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                 ),
               ),
               const SizedBox(height: 8),
+              Text(
+                'Open dashboard in desktop browser: '
+                '${_isValidServerUrl(_serverUrlController.text.trim()) ? _dashboardUrlFromReportUrl(_serverUrlController.text.trim()) : 'http://<desktop-ip>:8080/'}',
+              ),
+              const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
                 child: OutlinedButton.icon(
@@ -471,9 +439,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                       const SizedBox(height: 6),
                       Text('Location: $_locationText'),
                       const SizedBox(height: 6),
-                      Text(
-                        'Description: ${_descriptionController.text.trim().isEmpty ? 'Not entered yet' : _descriptionController.text.trim()}',
-                      ),
+                      Text('Description: $_descriptionPreview'),
                     ],
                   ),
                 ),
@@ -517,37 +483,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                   ),
                 ),
               ],
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      const Text(
-                        'Runtime Logs',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      if (_runtimeLogs.isEmpty)
-                        const Text('No logs yet')
-                      else
-                        SizedBox(
-                          height: 180,
-                          child: ListView.builder(
-                            itemCount: _runtimeLogs.length,
-                            itemBuilder: (BuildContext context, int index) {
-                              return Text(
-                                _runtimeLogs[index],
-                                style: const TextStyle(fontSize: 12),
-                              );
-                            },
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
             ],
           ),
         ),

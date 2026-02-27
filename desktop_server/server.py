@@ -55,6 +55,10 @@ class CivicHandler(BaseHTTPRequestHandler):
             self._send_json(reports)
             return
 
+        if self.path == '/health':
+            self._send_json({'ok': True, 'service': 'civic-issue-server'})
+            return
+
         if self.path in ('/', '/index.html'):
             self._send_file(PUBLIC_DIR / 'index.html')
             return
