@@ -37,10 +37,8 @@ class ComplaintScreen extends StatefulWidget {
 }
 
 class _ComplaintScreenState extends State<ComplaintScreen> {
+  static const String _serverUrl = 'http://10.0.2.2:8080/report';
   final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _serverUrlController = TextEditingController(
-    text: 'http://10.0.2.2:8080/report',
-  );
   final ImagePicker _picker = ImagePicker();
 
   final List<String> _issueTypes = <String>[
@@ -60,21 +58,8 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   String? _lastSentJson;
 
   @override
-  void initState() {
-    super.initState();
-    _serverUrlController.addListener(_onServerUrlChanged);
-  }
-
-  void _onServerUrlChanged() {
-    if (!mounted) return;
-    setState(() {});
-  }
-
-  @override
   void dispose() {
-    _serverUrlController.removeListener(_onServerUrlChanged);
     _descriptionController.dispose();
-    _serverUrlController.dispose();
     super.dispose();
   }
 
@@ -152,16 +137,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     };
   }
 
-  String _healthUrlFromReportUrl(String reportUrl) {
-    final Uri uri = Uri.parse(reportUrl);
-    return uri.replace(path: '/health', query: '').toString();
-  }
-
-  String _dashboardUrlFromReportUrl(String reportUrl) {
-    final Uri uri = Uri.parse(reportUrl);
-    return uri.replace(path: '/', query: '').toString();
-  }
-
   bool _isValidServerUrl(String value) {
     try {
       final Uri uri = Uri.parse(value);
@@ -170,41 +145,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
           uri.host.isNotEmpty;
     } catch (_) {
       return false;
-    }
-  }
-
-  Future<void> _testServerConnection() async {
-    final String reportUrl = _serverUrlController.text.trim();
-    if (!_isValidServerUrl(reportUrl)) {
-      _showMessage(
-        'Invalid server URL. Example: http://192.168.1.10:8080/report',
-      );
-      return;
-    }
-
-    final String healthUrl = _healthUrlFromReportUrl(reportUrl);
-
-    try {
-      final http.Response response = await http
-          .get(Uri.parse(healthUrl))
-          .timeout(const Duration(seconds: 8));
-      if (response.statusCode == 200) {
-        _showMessage('Server reachable: $healthUrl');
-      } else {
-        _showMessage(
-          'Server reachable but unhealthy (${response.statusCode}).',
-        );
-      }
-    } on TimeoutException {
-      _showMessage(
-        'Connection timed out. Check server running, IP, Wi-Fi, and firewall port 8080.',
-      );
-    } on SocketException {
-      _showMessage(
-        'Network error. Use desktop LAN IP (not localhost/10.0.2.2 on real phone).',
-      );
-    } catch (error) {
-      _showMessage('Connection test failed: $error');
     }
   }
 
@@ -221,12 +161,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       return;
     }
 
-    final String serverUrl = _serverUrlController.text.trim();
-    if (serverUrl.isEmpty) {
-      _showMessage('Please enter the desktop server URL.');
-      return;
-    }
-    if (!_isValidServerUrl(serverUrl)) {
+    if (!_isValidServerUrl(_serverUrl)) {
       _showMessage(
         'Invalid server URL. Example: http://192.168.1.10:8080/report',
       );
@@ -251,7 +186,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
       final http.Response response = await http
           .post(
-            Uri.parse(serverUrl),
+            Uri.parse(_serverUrl),
             headers: <String, String>{'Content-Type': 'application/json'},
             body: payloadJson,
           )
@@ -367,29 +302,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                 ],
               ),
               const SizedBox(height: 20),
-              TextField(
-                controller: _serverUrlController,
-                decoration: const InputDecoration(
-                  labelText: 'Desktop Server URL',
-                  hintText: 'http://<desktop-ip>:8080/report',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Open dashboard in desktop browser: '
-                '${_isValidServerUrl(_serverUrlController.text.trim()) ? _dashboardUrlFromReportUrl(_serverUrlController.text.trim()) : 'http://<desktop-ip>:8080/'}',
-              ),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: _testServerConnection,
-                  icon: const Icon(Icons.network_check),
-                  label: const Text('Test Server Connection'),
-                ),
-              ),
-              const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _selectedIssue,
                 decoration: const InputDecoration(
@@ -415,6 +327,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               TextField(
                 controller: _descriptionController,
                 maxLines: 4,
+                onChanged: (_) => setState(() {}),
                 decoration: const InputDecoration(
                   labelText: 'Problem Description',
                   hintText: 'Describe the issue in detail...',
