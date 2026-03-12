@@ -17,6 +17,19 @@ void main() {
   runApp(const CivicIssueApp());
 }
 
+const String kServerUrl = 'http://10.0.2.2:8080/report';
+
+bool isValidServerUrl(String value) {
+  try {
+    final Uri uri = Uri.parse(value);
+    return uri.hasScheme &&
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty;
+  } catch (_) {
+    return false;
+  }
+}
+
 class CivicIssueApp extends StatelessWidget {
   const CivicIssueApp({super.key});
 
@@ -29,13 +42,721 @@ class CivicIssueApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: const ComplaintScreen(),
+      home: const FrontPageScreen(),
+    );
+  }
+}
+
+class IssueRecord {
+  const IssueRecord({
+    required this.issueType,
+    required this.description,
+    required this.timestamp,
+    required this.location,
+    required this.imageCount,
+    required this.status,
+  });
+
+  final String issueType;
+  final String description;
+  final DateTime timestamp;
+  final IssueLocation? location;
+  final int imageCount;
+  final String status;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'issueType': issueType,
+      'description': description,
+      'timestamp': timestamp.toIso8601String(),
+      'location': location == null
+          ? null
+          : <String, dynamic>{
+              'latitude': location!.latitude,
+              'longitude': location!.longitude,
+            },
+      'imageCount': imageCount,
+      'status': status,
+    };
+  }
+
+  static IssueRecord fromJson(Map<String, dynamic> json) {
+    final Map<String, dynamic>? locationJson =
+        json['location'] as Map<String, dynamic>?;
+    return IssueRecord(
+      issueType: json['issueType'] as String? ?? 'Unknown issue',
+      description: json['description'] as String? ?? '',
+      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+          DateTime.now(),
+      location: locationJson == null
+          ? null
+          : IssueLocation(
+              latitude: (locationJson['latitude'] as num?)?.toDouble() ?? 0,
+              longitude: (locationJson['longitude'] as num?)?.toDouble() ?? 0,
+            ),
+      imageCount: (json['imageCount'] as num?)?.toInt() ?? 0,
+      status: json['status'] as String? ?? 'saved_offline',
+    );
+  }
+}
+
+class StoredReport {
+  const StoredReport({required this.record, required this.payloadJson});
+
+  final IssueRecord record;
+  final String payloadJson;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'record': record.toJson(),
+      'payloadJson': payloadJson,
+    };
+  }
+
+  static StoredReport fromJson(Map<String, dynamic> json) {
+    final Map<String, dynamic> recordJson =
+        json['record'] as Map<String, dynamic>? ?? <String, dynamic>{};
+    return StoredReport(
+      record: IssueRecord.fromJson(recordJson),
+      payloadJson: json['payloadJson'] as String? ?? '{}',
+    );
+  }
+}
+
+class ReportStore {
+  Future<File> _file() async {
+    final Directory dir = await getApplicationDocumentsDirectory();
+    return File(path.join(dir.path, 'stored_reports.json'));
+  }
+
+  Future<List<StoredReport>> load() async {
+    try {
+      final File file = await _file();
+      if (!await file.exists()) return <StoredReport>[];
+      final String raw = await file.readAsString();
+      final List<dynamic> data = jsonDecode(raw) as List<dynamic>;
+      return data
+          .whereType<Map<String, dynamic>>()
+          .map(StoredReport.fromJson)
+          .toList();
+    } catch (_) {
+      return <StoredReport>[];
+    }
+  }
+
+  Future<void> save(List<StoredReport> reports) async {
+    final File file = await _file();
+    final String raw = jsonEncode(
+      reports.map((StoredReport report) => report.toJson()).toList(),
+    );
+    await file.writeAsString(raw, flush: true);
+  }
+}
+
+class FrontPageScreen extends StatefulWidget {
+  const FrontPageScreen({super.key});
+
+  @override
+  State<FrontPageScreen> createState() => _FrontPageScreenState();
+}
+
+class _FrontPageScreenState extends State<FrontPageScreen> {
+  final ReportStore _store = ReportStore();
+  final List<StoredReport> _reports = <StoredReport>[];
+  bool _isSyncing = false;
+  static const Color _ink = Color(0xFF10223A);
+  static const Color _accent = Color(0xFF1E6B6E);
+  static const Color _cardTint = Color(0xFFF3F7F6);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReports();
+  }
+
+  Future<void> _loadReports() async {
+    final List<StoredReport> loaded = await _store.load();
+    loaded.sort(
+      (StoredReport a, StoredReport b) =>
+          b.record.timestamp.compareTo(a.record.timestamp),
+    );
+    if (!mounted) return;
+    setState(() {
+      _reports
+        ..clear()
+        ..addAll(loaded);
+    });
+  }
+
+  Future<void> _openNewReport() async {
+    final StoredReport? report =
+        await Navigator.of(context).push<StoredReport>(
+      MaterialPageRoute<StoredReport>(
+        builder: (BuildContext context) => const ComplaintScreen(
+          returnOnSuccess: true,
+          showSuccessMessage: false,
+        ),
+      ),
+    );
+
+    if (report == null || !mounted) return;
+
+    setState(() {
+      _reports.insert(0, report);
+    });
+    await _store.save(_reports);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          report.record.status == 'saved_offline'
+              ? 'Saved offline. Upload when internet is available.'
+              : 'Issue report added to records.',
+        ),
+      ),
+    );
+  }
+
+  int get _pendingCount =>
+      _reports.where((StoredReport r) => r.record.status == 'saved_offline')
+          .length;
+
+  Future<void> _syncPendingReports() async {
+    if (_isSyncing) return;
+    if (!isValidServerUrl(kServerUrl)) {
+      _showSnack('Invalid server URL: $kServerUrl');
+      return;
+    }
+    setState(() {
+      _isSyncing = true;
+    });
+
+    int success = 0;
+    int failed = 0;
+
+    for (final StoredReport report in _reports) {
+      if (report.record.status != 'saved_offline') {
+        continue;
+      }
+      try {
+        final http.Response response = await http
+            .post(
+              Uri.parse(kServerUrl),
+              headers: <String, String>{'Content-Type': 'application/json'},
+              body: report.payloadJson,
+            )
+            .timeout(const Duration(seconds: 20));
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          success += 1;
+          final IssueRecord updated = IssueRecord(
+            issueType: report.record.issueType,
+            description: report.record.description,
+            timestamp: report.record.timestamp,
+            location: report.record.location,
+            imageCount: report.record.imageCount,
+            status: 'submitted_to_authority',
+          );
+          final int index = _reports.indexOf(report);
+          _reports[index] = StoredReport(
+            record: updated,
+            payloadJson: report.payloadJson,
+          );
+        } else {
+          failed += 1;
+        }
+      } on TimeoutException {
+        failed += 1;
+      } on SocketException {
+        failed += 1;
+      } catch (_) {
+        failed += 1;
+      }
+    }
+
+    await _store.save(_reports);
+    if (!mounted) return;
+    setState(() {
+      _isSyncing = false;
+    });
+
+    _showSnack(
+      success > 0
+          ? 'Uploaded $success report(s), failed $failed. Pending: $_pendingCount.'
+          : 'No pending reports uploaded. Failed: $failed. Pending: $_pendingCount.',
+    );
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Widget _buildRecordCard(IssueRecord record, int index) {
+    final String formattedTime = DateFormat(
+      'dd MMM yyyy, hh:mm a',
+    ).format(record.timestamp);
+    final String locationText = record.location == null
+        ? 'Location: not provided'
+        : 'Location: ${record.location!.latitude.toStringAsFixed(5)}, '
+            '${record.location!.longitude.toStringAsFixed(5)}';
+    final Color stripeColor = Color.lerp(
+      _accent,
+      const Color(0xFFE76F51),
+      (index % 3) / 3,
+    )!;
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          color: Colors.white,
+          child: Row(
+            children: <Widget>[
+              Container(width: 6, color: stripeColor),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              record.issueType,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: _ink,
+                              ),
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _cardTint,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              record.status.replaceAll('_', ' '),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: _accent,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        record.description,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: _ink),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          _InfoPill(
+                            icon: Icons.schedule,
+                            label: formattedTime,
+                          ),
+                          _InfoPill(
+                            icon: Icons.photo,
+                            label: '${record.imageCount} images',
+                          ),
+                          _InfoPill(
+                            icon: Icons.place,
+                            label: locationText,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: <Color>[Color(0xFFE6F4F1), Color(0xFFF8F3E7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                height: 46,
+                width: 46,
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.hub, color: _accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Welcome to Civic Issue Report',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: _ink,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Report local issues with photos, location, and details. '
+            'Your recent reports appear below.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: _ink.withValues(alpha: 0.75),
+                ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: <Widget>[
+              InkWell(
+                onTap: _openNewReport,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const Icon(Icons.add_circle, size: 18, color: _accent),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Tap + to add a new issue',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: _ink,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_pendingCount > 0)
+                FilledButton.icon(
+                  onPressed: _isSyncing ? null : _syncPendingReports,
+                  icon: _isSyncing
+                      ? const SizedBox(
+                          height: 14,
+                          width: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.cloud_upload),
+                  label: Text('Upload pending ($_pendingCount)'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _accent,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsRow() {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: _StatCard(
+            label: 'Total Reports',
+            value: _reports.length.toString(),
+            icon: Icons.assignment,
+            tint: const Color(0xFF1976D2),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _StatCard(
+            label: 'Last Activity',
+            value: _reports.isEmpty
+                ? 'No reports'
+                : DateFormat('dd MMM').format(_reports.first.record.timestamp),
+            icon: Icons.access_time,
+            tint: const Color(0xFF388E3C),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Civic Issue Reporter'),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        elevation: 0,
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openNewReport,
+        icon: const Icon(Icons.add),
+        label: const Text('New Report'),
+        backgroundColor: _accent,
+        foregroundColor: Colors.white,
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      body: SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: <Color>[Color(0xFFF8FBFA), Color(0xFFFDF6EE)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _buildHeader(),
+                const SizedBox(height: 16),
+                _buildStatsRow(),
+                const SizedBox(height: 18),
+                Row(
+                  children: <Widget>[
+                    const Icon(Icons.history, size: 18, color: _ink),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Previous Records',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: _ink,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '${_reports.length} total',
+                      style: TextStyle(
+                        color: _ink.withValues(alpha: 0.6),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                if (_reports.isEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      color: Colors.white,
+                      border: Border.all(
+                        color: _accent.withValues(alpha: 0.15),
+                      ),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        Container(
+                          height: 42,
+                          width: 42,
+                          decoration: BoxDecoration(
+                            color: _accent.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.inbox, color: _accent),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'No records yet. Submit your first issue report.',
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Column(
+                    children: _reports
+                        .asMap()
+                        .entries
+                        .map(
+                          (MapEntry<int, StoredReport> entry) => Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _buildRecordCard(
+                              entry.value.record,
+                              entry.key,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.tint,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.white,
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            height: 40,
+            width: 40,
+            decoration: BoxDecoration(
+              color: tint.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: tint),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.black.withValues(alpha: 0.6),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  const _InfoPill({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F5F7),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 14, color: Colors.black54),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: Colors.black87),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class ComplaintScreen extends StatefulWidget {
-  const ComplaintScreen({super.key});
+  const ComplaintScreen({
+    super.key,
+    this.returnOnSuccess = false,
+    this.showSuccessMessage = true,
+  });
+
+  final bool returnOnSuccess;
+  final bool showSuccessMessage;
 
   @override
   State<ComplaintScreen> createState() => _ComplaintScreenState();
@@ -49,7 +770,6 @@ class IssueLocation {
 }
 
 class _ComplaintScreenState extends State<ComplaintScreen> {
-  static const String _serverUrl = 'http://10.0.2.2:8080/report';
   static const int _maxImages = 4;
   static const int _maxImageBytes = 1024 * 1024;
   final TextEditingController _descriptionController = TextEditingController();
@@ -292,17 +1012,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     };
   }
 
-  bool _isValidServerUrl(String value) {
-    try {
-      final Uri uri = Uri.parse(value);
-      return uri.hasScheme &&
-          (uri.scheme == 'http' || uri.scheme == 'https') &&
-          uri.host.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<void> _submitComplaint() async {
     final String trimmedDescription = _descriptionController.text.trim();
 
@@ -316,7 +1025,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       return;
     }
 
-    if (!_isValidServerUrl(_serverUrl)) {
+    if (!isValidServerUrl(kServerUrl)) {
       _showMessage(
         'Invalid server URL. Example: http://192.168.1.10:8080/report',
       );
@@ -327,11 +1036,12 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       _isSubmitting = true;
     });
 
+    String? payloadJson;
     try {
       final Map<String, dynamic> payload = await _buildPayload(
         trimmedDescription,
       );
-      final String payloadJson = const JsonEncoder.withIndent(
+      payloadJson = const JsonEncoder.withIndent(
         '  ',
       ).convert(payload);
 
@@ -341,7 +1051,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
       final http.Response response = await http
           .post(
-            Uri.parse(_serverUrl),
+            Uri.parse(kServerUrl),
             headers: <String, String>{'Content-Type': 'application/json'},
             body: payloadJson,
           )
@@ -350,19 +1060,43 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       if (!mounted) return;
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        _showMessage('Complaint sent to authority server successfully.');
+        if (widget.showSuccessMessage) {
+          _showMessage('Complaint sent to authority server successfully.');
+        }
+
+        if (widget.returnOnSuccess && mounted) {
+          Navigator.of(context).pop(
+            StoredReport(
+              record: IssueRecord(
+                issueType: _selectedIssue,
+                description: trimmedDescription,
+                timestamp: _capturedAt ?? DateTime.now(),
+                location: _selectedLocation,
+                imageCount: _selectedImages.length,
+                status: 'submitted_to_authority',
+              ),
+              payloadJson: payloadJson,
+            ),
+          );
+        }
       } else {
         _showMessage(
           'Server rejected complaint (${response.statusCode}): ${response.body}',
         );
       }
     } on TimeoutException {
+      if (payloadJson != null) {
+        _saveOfflineAndReturn(payloadJson, trimmedDescription);
+      }
       _showMessage(
-        'Request timed out. Verify server URL, server status, Wi-Fi network, and firewall.',
+        'No internet. Saved offline. Upload when you are online.',
       );
     } on SocketException {
+      if (payloadJson != null) {
+        _saveOfflineAndReturn(payloadJson, trimmedDescription);
+      }
       _showMessage(
-        'Network error while sending. On real phone use http://<desktop-ip>:8080/report.',
+        'Network error. Saved offline. Upload when you are online.',
       );
     } on FormatException {
       _showMessage('Invalid URL format. Please check desktop server URL.');
@@ -377,6 +1111,23 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
         });
       }
     }
+  }
+
+  void _saveOfflineAndReturn(String payloadJson, String description) {
+    if (!widget.returnOnSuccess || !mounted) return;
+    Navigator.of(context).pop(
+      StoredReport(
+        record: IssueRecord(
+          issueType: _selectedIssue,
+          description: description,
+          timestamp: _capturedAt ?? DateTime.now(),
+          location: _selectedLocation,
+          imageCount: _selectedImages.length,
+          status: 'saved_offline',
+        ),
+        payloadJson: payloadJson,
+      ),
+    );
   }
 
   void _showMessage(String message) {
