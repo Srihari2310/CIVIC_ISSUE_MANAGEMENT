@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -13,21 +17,15 @@ import 'package:latlong2/latlong.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
-void main() {
+import 'firebase_options.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+  );
   runApp(const CivicIssueApp());
-}
-
-const String kServerUrl = 'http://10.0.2.2:8080/report';
-
-bool isValidServerUrl(String value) {
-  try {
-    final Uri uri = Uri.parse(value);
-    return uri.hasScheme &&
-        (uri.scheme == 'http' || uri.scheme == 'https') &&
-        uri.host.isNotEmpty;
-  } catch (_) {
-    return false;
-  }
 }
 
 class CivicIssueApp extends StatelessWidget {
@@ -80,6 +78,22 @@ class IssueRecord {
     };
   }
 
+  Map<String, dynamic> toFirestore() {
+    return <String, dynamic>{
+      'issueType': issueType,
+      'description': description,
+      'timestamp': Timestamp.fromDate(timestamp),
+      'location': location == null
+          ? null
+          : <String, dynamic>{
+              'latitude': location!.latitude,
+              'longitude': location!.longitude,
+            },
+      'imageCount': imageCount,
+      'status': status,
+    };
+  }
+
   static IssueRecord fromJson(Map<String, dynamic> json) {
     final Map<String, dynamic>? locationJson =
         json['location'] as Map<String, dynamic>?;
@@ -96,9 +110,67 @@ class IssueRecord {
               longitude: (locationJson['longitude'] as num?)?.toDouble() ?? 0,
             ),
       imageCount: (json['imageCount'] as num?)?.toInt() ?? 0,
-      status: json['status'] as String? ?? 'saved_offline',
+      status: json['status'] as String? ?? 'submitted_to_firestore',
     );
   }
+
+  static IssueRecord fromFirestore(Map<String, dynamic> data) {
+    final Map<String, dynamic>? locationJson =
+        data['location'] as Map<String, dynamic>?;
+    final DateTime timestamp = _parseTimestamp(data['timestamp']);
+    return IssueRecord(
+      issueType: data['issueType'] as String? ?? 'Unknown issue',
+      description: data['description'] as String? ?? '',
+      timestamp: timestamp,
+      location: locationJson == null
+          ? null
+          : IssueLocation(
+              latitude: (locationJson['latitude'] as num?)?.toDouble() ?? 0,
+              longitude: (locationJson['longitude'] as num?)?.toDouble() ?? 0,
+            ),
+      imageCount: (data['imageCount'] as num?)?.toInt() ?? 0,
+      status: data['status'] as String? ?? 'submitted_to_firestore',
+    );
+  }
+}
+
+DateTime _parseTimestamp(dynamic raw) {
+  if (raw is Timestamp) {
+    return raw.toDate();
+  }
+  if (raw is String) {
+    return DateTime.tryParse(raw) ?? DateTime.now();
+  }
+  return DateTime.now();
+}
+
+Map<String, dynamic> _firestorePayloadFromRecord(IssueRecord record) {
+  return <String, dynamic>{
+    'issueType': record.issueType,
+    'description': record.description,
+    'timestamp': record.timestamp.toIso8601String(),
+    'timestampDisplay': DateFormat(
+      'dd MMM yyyy, hh:mm a',
+    ).format(record.timestamp),
+    'location': record.location == null
+        ? null
+        : <String, dynamic>{
+            'latitude': record.location!.latitude,
+            'longitude': record.location!.longitude,
+          },
+    'imageCount': record.imageCount,
+    'status': record.status,
+    'source': 'flutter_mobile_app',
+  };
+}
+
+Map<String, dynamic> _firestorePayloadForPreview(Map<String, dynamic> payload) {
+  final Map<String, dynamic> preview = Map<String, dynamic>.from(payload);
+  final dynamic rawTimestamp = preview['timestamp'];
+  if (rawTimestamp is Timestamp) {
+    preview['timestamp'] = rawTimestamp.toDate().toIso8601String();
+  }
+  return preview;
 }
 
 class StoredReport {
@@ -124,36 +196,6 @@ class StoredReport {
   }
 }
 
-class ReportStore {
-  Future<File> _file() async {
-    final Directory dir = await getApplicationDocumentsDirectory();
-    return File(path.join(dir.path, 'stored_reports.json'));
-  }
-
-  Future<List<StoredReport>> load() async {
-    try {
-      final File file = await _file();
-      if (!await file.exists()) return <StoredReport>[];
-      final String raw = await file.readAsString();
-      final List<dynamic> data = jsonDecode(raw) as List<dynamic>;
-      return data
-          .whereType<Map<String, dynamic>>()
-          .map(StoredReport.fromJson)
-          .toList();
-    } catch (_) {
-      return <StoredReport>[];
-    }
-  }
-
-  Future<void> save(List<StoredReport> reports) async {
-    final File file = await _file();
-    final String raw = jsonEncode(
-      reports.map((StoredReport report) => report.toJson()).toList(),
-    );
-    await file.writeAsString(raw, flush: true);
-  }
-}
-
 class FrontPageScreen extends StatefulWidget {
   const FrontPageScreen({super.key});
 
@@ -162,31 +204,76 @@ class FrontPageScreen extends StatefulWidget {
 }
 
 class _FrontPageScreenState extends State<FrontPageScreen> {
-  final ReportStore _store = ReportStore();
   final List<StoredReport> _reports = <StoredReport>[];
-  bool _isSyncing = false;
   static const Color _ink = Color(0xFF10223A);
   static const Color _accent = Color(0xFF1E6B6E);
   static const Color _cardTint = Color(0xFFF3F7F6);
+  late final StreamSubscription<List<ConnectivityResult>> _connectivitySub;
+  bool _isOnline = true;
 
   @override
   void initState() {
     super.initState();
+    _initConnectivity();
+    _connectivitySub = Connectivity().onConnectivityChanged.listen(
+      _handleConnectivityChange,
+    );
     _loadReports();
   }
 
-  Future<void> _loadReports() async {
-    final List<StoredReport> loaded = await _store.load();
-    loaded.sort(
-      (StoredReport a, StoredReport b) =>
-          b.record.timestamp.compareTo(a.record.timestamp),
-    );
-    if (!mounted) return;
+  @override
+  void dispose() {
+    _connectivitySub.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initConnectivity() async {
+    final List<ConnectivityResult> result =
+        await Connectivity().checkConnectivity();
+    _handleConnectivityChange(result);
+  }
+
+  void _handleConnectivityChange(List<ConnectivityResult> result) {
+    final bool online = !result.contains(ConnectivityResult.none);
+    if (online == _isOnline) return;
     setState(() {
-      _reports
-        ..clear()
-        ..addAll(loaded);
+      _isOnline = online;
     });
+    if (online) {
+      _showSnack('Back online. Syncing reports.');
+      _loadReports();
+    } else {
+      _showSnack('Device is offline. Reports will upload when online.');
+    }
+  }
+
+  Future<void> _loadReports() async {
+    try {
+      final QuerySnapshot<Map<String, dynamic>> snapshot =
+          await FirebaseFirestore.instance
+              .collection('reports')
+              .orderBy('timestamp', descending: true)
+              .get();
+
+      final List<StoredReport> loaded = snapshot.docs.map((doc) {
+        final Map<String, dynamic> data = doc.data();
+        final IssueRecord record = IssueRecord.fromFirestore(data);
+        final String payloadJson = const JsonEncoder.withIndent(
+          '  ',
+        ).convert(_firestorePayloadFromRecord(record));
+        return StoredReport(record: record, payloadJson: payloadJson);
+      }).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _reports
+          ..clear()
+          ..addAll(loaded);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack('Failed to load reports from Firestore: $error');
+    }
   }
 
   Future<void> _openNewReport() async {
@@ -204,86 +291,10 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     setState(() {
       _reports.insert(0, report);
     });
-    await _store.save(_reports);
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          report.record.status == 'saved_offline'
-              ? 'Saved offline. Upload when internet is available.'
-              : 'Issue report added to records.',
-        ),
-      ),
-    );
-  }
-
-  int get _pendingCount => _reports
-      .where((StoredReport r) => r.record.status == 'saved_offline')
-      .length;
-
-  Future<void> _syncPendingReports() async {
-    if (_isSyncing) return;
-    if (!isValidServerUrl(kServerUrl)) {
-      _showSnack('Invalid server URL: $kServerUrl');
-      return;
-    }
-    setState(() {
-      _isSyncing = true;
-    });
-
-    int success = 0;
-    int failed = 0;
-
-    for (final StoredReport report in _reports) {
-      if (report.record.status != 'saved_offline') {
-        continue;
-      }
-      try {
-        final http.Response response = await http
-            .post(
-              Uri.parse(kServerUrl),
-              headers: <String, String>{'Content-Type': 'application/json'},
-              body: report.payloadJson,
-            )
-            .timeout(const Duration(seconds: 20));
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          success += 1;
-          final IssueRecord updated = IssueRecord(
-            issueType: report.record.issueType,
-            description: report.record.description,
-            timestamp: report.record.timestamp,
-            location: report.record.location,
-            imageCount: report.record.imageCount,
-            status: 'submitted_to_authority',
-          );
-          final int index = _reports.indexOf(report);
-          _reports[index] = StoredReport(
-            record: updated,
-            payloadJson: report.payloadJson,
-          );
-        } else {
-          failed += 1;
-        }
-      } on TimeoutException {
-        failed += 1;
-      } on SocketException {
-        failed += 1;
-      } catch (_) {
-        failed += 1;
-      }
-    }
-
-    await _store.save(_reports);
-    if (!mounted) return;
-    setState(() {
-      _isSyncing = false;
-    });
-
-    _showSnack(
-      success > 0
-          ? 'Uploaded $success report(s), failed $failed. Pending: $_pendingCount.'
-          : 'No pending reports uploaded. Failed: $failed. Pending: $_pendingCount.',
+      SnackBar(content: Text('Issue report added to Firestore records.')),
     );
   }
 
@@ -395,6 +406,35 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     );
   }
 
+  Widget _buildConnectivityBanner() {
+    if (_isOnline) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3CD),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFFE69C)),
+      ),
+      child: Row(
+        children: const <Widget>[
+          Icon(Icons.wifi_off, size: 18, color: Color(0xFF8A6D3B)),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Device is offline. Reports will upload when online.',
+              style: TextStyle(
+                color: Color(0xFF8A6D3B),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     return Container(
       width: double.infinity,
@@ -481,22 +521,6 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                   ),
                 ),
               ),
-              if (_pendingCount > 0)
-                FilledButton.icon(
-                  onPressed: _isSyncing ? null : _syncPendingReports,
-                  icon: _isSyncing
-                      ? const SizedBox(
-                          height: 14,
-                          width: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.cloud_upload),
-                  label: Text('Upload pending ($_pendingCount)'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _accent,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
             ],
           ),
         ],
@@ -561,6 +585,7 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
+                _buildConnectivityBanner(),
                 _buildHeader(),
                 const SizedBox(height: 16),
                 _buildStatsRow(),
@@ -790,6 +815,12 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   bool _isSubmitting = false;
   String? _lastSentJson;
 
+  Future<bool> _isOnline() async {
+    final List<ConnectivityResult> result =
+        await Connectivity().checkConnectivity();
+    return !result.contains(ConnectivityResult.none);
+  }
+
   @override
   void dispose() {
     _descriptionController.dispose();
@@ -806,7 +837,9 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
       final XFile? image = await _picker.pickImage(
         source: source,
-        imageQuality: 100,
+        imageQuality: 85,
+        maxWidth: 1600,
+        maxHeight: 1600,
       );
       if (image == null) return;
 
@@ -836,7 +869,9 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       }
 
       final List<XFile> images = await _picker.pickMultiImage(
-        imageQuality: 100,
+        imageQuality: 85,
+        maxWidth: 1600,
+        maxHeight: 1600,
       );
       if (images.isEmpty) return;
 
@@ -879,10 +914,11 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   }
 
   Future<XFile?> _compressToLimit(XFile source) async {
-    final bytes = await File(source.path).readAsBytes();
+    final Uint8List bytes = await File(source.path).readAsBytes();
     final img.Image? decoded = img.decodeImage(bytes);
-    if (decoded == null) return null;
-
+    if (decoded == null) {
+      return null;
+    }
     img.Image working = decoded;
     int quality = 90;
     List<int> encoded = img.encodeJpg(working, quality: quality);
@@ -983,23 +1019,14 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   }
 
   // Payload + submission
-  Future<Map<String, dynamic>> _buildPayload(String description) async {
+  Future<Map<String, dynamic>> _buildFirestorePayload(
+    String description,
+  ) async {
     final DateTime reportTime = _capturedAt ?? DateTime.now();
-    final List<Map<String, dynamic>> images = <Map<String, dynamic>>[];
-    for (final XFile image in _selectedImages) {
-      final List<int> imageBytes = await File(image.path).readAsBytes();
-      images.add(<String, dynamic>{
-        'fileName': image.name,
-        'mimeType': 'image/jpeg',
-        'sizeBytes': imageBytes.length,
-        'base64Data': base64Encode(imageBytes),
-      });
-    }
-
     return <String, dynamic>{
       'issueType': _selectedIssue,
       'description': description,
-      'timestamp': reportTime.toIso8601String(),
+      'timestamp': Timestamp.fromDate(reportTime),
       'timestampDisplay': DateFormat('dd MMM yyyy, hh:mm a').format(reportTime),
       'location': _selectedLocation == null
           ? null
@@ -1007,8 +1034,8 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               'latitude': _selectedLocation!.latitude,
               'longitude': _selectedLocation!.longitude,
             },
-      'images': images,
-      'status': 'submitted_to_authority',
+      'imageCount': _selectedImages.length,
+      'status': 'submitted_to_firestore',
       'source': 'flutter_mobile_app',
     };
   }
@@ -1026,79 +1053,52 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       return;
     }
 
-    if (!isValidServerUrl(kServerUrl)) {
-      _showMessage(
-        'Invalid server URL. Example: http://192.168.1.10:8080/report',
-      );
-      return;
-    }
-
     setState(() {
       _isSubmitting = true;
     });
 
-    String? payloadJson;
     try {
-      final Map<String, dynamic> payload = await _buildPayload(
+      final bool online = await _isOnline();
+      if (!online && mounted) {
+        _showMessage(
+          'Device is offline. Complaint will upload when connectivity returns.',
+        );
+      }
+      final Map<String, dynamic> payload = await _buildFirestorePayload(
         trimmedDescription,
       );
-      payloadJson = const JsonEncoder.withIndent('  ').convert(payload);
+      final String payloadJson = const JsonEncoder.withIndent(
+        '  ',
+      ).convert(_firestorePayloadForPreview(payload));
 
       setState(() {
         _lastSentJson = payloadJson;
       });
 
-      final http.Response response = await http
-          .post(
-            Uri.parse(kServerUrl),
-            headers: <String, String>{'Content-Type': 'application/json'},
-            body: payloadJson,
-          )
-          .timeout(const Duration(seconds: 20));
+      await FirebaseFirestore.instance.collection('reports').add(payload);
 
       if (!mounted) return;
+      if (widget.showSuccessMessage) {
+        _showMessage('Complaint saved to Firestore successfully.');
+      }
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        if (widget.showSuccessMessage) {
-          _showMessage('Complaint sent to authority server successfully.');
-        }
-
-        if (widget.returnOnSuccess && mounted) {
-          Navigator.of(context).pop(
-            StoredReport(
-              record: IssueRecord(
-                issueType: _selectedIssue,
-                description: trimmedDescription,
-                timestamp: _capturedAt ?? DateTime.now(),
-                location: _selectedLocation,
-                imageCount: _selectedImages.length,
-                status: 'submitted_to_authority',
-              ),
-              payloadJson: payloadJson,
+      if (widget.returnOnSuccess && mounted) {
+        Navigator.of(context).pop(
+          StoredReport(
+            record: IssueRecord(
+              issueType: _selectedIssue,
+              description: trimmedDescription,
+              timestamp: _capturedAt ?? DateTime.now(),
+              location: _selectedLocation,
+              imageCount: _selectedImages.length,
+              status: 'submitted_to_firestore',
             ),
-          );
-        }
-      } else {
-        _showMessage(
-          'Server rejected complaint (${response.statusCode}): ${response.body}',
+            payloadJson: payloadJson,
+          ),
         );
       }
-    } on TimeoutException {
-      if (payloadJson != null) {
-        _saveOfflineAndReturn(payloadJson, trimmedDescription);
-      }
-      _showMessage('No internet. Saved offline. Upload when you are online.');
-    } on SocketException {
-      if (payloadJson != null) {
-        _saveOfflineAndReturn(payloadJson, trimmedDescription);
-      }
-      _showMessage('Network error. Saved offline. Upload when you are online.');
-    } on FormatException {
-      _showMessage('Invalid URL format. Please check desktop server URL.');
-    } on http.ClientException catch (clientError) {
-      _showMessage('HTTP client error: $clientError');
     } catch (error) {
-      _showMessage('Failed to send complaint: $error');
+      _showMessage('Failed to save complaint: $error');
     } finally {
       if (mounted) {
         setState(() {
@@ -1106,23 +1106,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
         });
       }
     }
-  }
-
-  void _saveOfflineAndReturn(String payloadJson, String description) {
-    if (!widget.returnOnSuccess || !mounted) return;
-    Navigator.of(context).pop(
-      StoredReport(
-        record: IssueRecord(
-          issueType: _selectedIssue,
-          description: description,
-          timestamp: _capturedAt ?? DateTime.now(),
-          location: _selectedLocation,
-          imageCount: _selectedImages.length,
-          status: 'saved_offline',
-        ),
-        payloadJson: payloadJson,
-      ),
-    );
   }
 
   void _showMessage(String message) {
@@ -1175,6 +1158,8 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                   width: 160,
                   height: 160,
                   fit: BoxFit.cover,
+                  cacheWidth: 480,
+                  cacheHeight: 480,
                 ),
               ),
               Positioned(
