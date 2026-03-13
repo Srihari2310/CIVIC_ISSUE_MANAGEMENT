@@ -86,7 +86,8 @@ class IssueRecord {
     return IssueRecord(
       issueType: json['issueType'] as String? ?? 'Unknown issue',
       description: json['description'] as String? ?? '',
-      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ??
           DateTime.now(),
       location: locationJson == null
           ? null
@@ -189,8 +190,7 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
   }
 
   Future<void> _openNewReport() async {
-    final StoredReport? report =
-        await Navigator.of(context).push<StoredReport>(
+    final StoredReport? report = await Navigator.of(context).push<StoredReport>(
       MaterialPageRoute<StoredReport>(
         builder: (BuildContext context) => const ComplaintScreen(
           returnOnSuccess: true,
@@ -218,9 +218,9 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     );
   }
 
-  int get _pendingCount =>
-      _reports.where((StoredReport r) => r.record.status == 'saved_offline')
-          .length;
+  int get _pendingCount => _reports
+      .where((StoredReport r) => r.record.status == 'saved_offline')
+      .length;
 
   Future<void> _syncPendingReports() async {
     if (_isSyncing) return;
@@ -289,9 +289,9 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _buildRecordCard(IssueRecord record, int index) {
@@ -301,7 +301,7 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     final String locationText = record.location == null
         ? 'Location: not provided'
         : 'Location: ${record.location!.latitude.toStringAsFixed(5)}, '
-            '${record.location!.longitude.toStringAsFixed(5)}';
+              '${record.location!.longitude.toStringAsFixed(5)}';
     final Color stripeColor = Color.lerp(
       _accent,
       const Color(0xFFE76F51),
@@ -376,18 +376,12 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                         spacing: 10,
                         runSpacing: 6,
                         children: <Widget>[
-                          _InfoPill(
-                            icon: Icons.schedule,
-                            label: formattedTime,
-                          ),
+                          _InfoPill(icon: Icons.schedule, label: formattedTime),
                           _InfoPill(
                             icon: Icons.photo,
                             label: '${record.imageCount} images',
                           ),
-                          _InfoPill(
-                            icon: Icons.place,
-                            label: locationText,
-                          ),
+                          _InfoPill(icon: Icons.place, label: locationText),
                         ],
                       ),
                     ],
@@ -439,9 +433,9 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                 child: Text(
                   'Welcome to Civic Issue Report',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: _ink,
-                      ),
+                    fontWeight: FontWeight.bold,
+                    color: _ink,
+                  ),
                 ),
               ),
             ],
@@ -451,8 +445,8 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
             'Report local issues with photos, location, and details. '
             'Your recent reports appear below.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: _ink.withValues(alpha: 0.75),
-                ),
+              color: _ink.withValues(alpha: 0.75),
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -463,8 +457,10 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                 onTap: _openNewReport,
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.8),
                     borderRadius: BorderRadius.circular(12),
@@ -477,9 +473,9 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                       Text(
                         'Tap + to add a new issue',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: _ink,
-                            ),
+                          fontWeight: FontWeight.w600,
+                          color: _ink,
+                        ),
                       ),
                     ],
                   ),
@@ -867,7 +863,9 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       });
 
       if (images.length > availableSlots) {
-        _showMessage('Only $availableSlots images were added (limit $_maxImages).');
+        _showMessage(
+          'Only $availableSlots images were added (limit $_maxImages).',
+        );
       } else if (failed > 0) {
         _showMessage('$failed image(s) could not be compressed to 1 MB.');
       }
@@ -1044,9 +1042,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       final Map<String, dynamic> payload = await _buildPayload(
         trimmedDescription,
       );
-      payloadJson = const JsonEncoder.withIndent(
-        '  ',
-      ).convert(payload);
+      payloadJson = const JsonEncoder.withIndent('  ').convert(payload);
 
       setState(() {
         _lastSentJson = payloadJson;
@@ -1091,16 +1087,12 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       if (payloadJson != null) {
         _saveOfflineAndReturn(payloadJson, trimmedDescription);
       }
-      _showMessage(
-        'No internet. Saved offline. Upload when you are online.',
-      );
+      _showMessage('No internet. Saved offline. Upload when you are online.');
     } on SocketException {
       if (payloadJson != null) {
         _saveOfflineAndReturn(payloadJson, trimmedDescription);
       }
-      _showMessage(
-        'Network error. Saved offline. Upload when you are online.',
-      );
+      _showMessage('Network error. Saved offline. Upload when you are online.');
     } on FormatException {
       _showMessage('Invalid URL format. Please check desktop server URL.');
     } on http.ClientException catch (clientError) {
@@ -1272,7 +1264,10 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
             const SizedBox(height: 6),
             Text('Timestamp: $_timeText', style: const TextStyle(color: _ink)),
             const SizedBox(height: 6),
-            Text('Location: $_locationText', style: const TextStyle(color: _ink)),
+            Text(
+              'Location: $_locationText',
+              style: const TextStyle(color: _ink),
+            ),
             const SizedBox(height: 6),
             Text(
               'Description: $_descriptionPreview',
@@ -1348,9 +1343,9 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                 child: Text(
                   'Create a New Issue Report',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: _ink,
-                      ),
+                    fontWeight: FontWeight.bold,
+                    color: _ink,
+                  ),
                 ),
               ),
             ],
@@ -1359,8 +1354,8 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
           Text(
             'Add photos, choose a location, and describe the issue so the authority can act quickly.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: _ink.withValues(alpha: 0.75),
-                ),
+              color: _ink.withValues(alpha: 0.75),
+            ),
           ),
         ],
       ),
