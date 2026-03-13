@@ -772,6 +772,9 @@ class IssueLocation {
 class _ComplaintScreenState extends State<ComplaintScreen> {
   static const int _maxImages = 4;
   static const int _maxImageBytes = 1024 * 1024;
+  static const Color _ink = Color(0xFF10223A);
+  static const Color _accent = Color(0xFF1E6B6E);
+  static const Color _cardTint = Color(0xFFF3F7F6);
   final TextEditingController _descriptionController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
 
@@ -1155,7 +1158,12 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
   Widget _buildImagePreview() {
     if (_selectedImages.isEmpty) {
-      return const Center(child: Text('No image selected'));
+      return Center(
+        child: Text(
+          'No image selected',
+          style: TextStyle(color: _ink.withValues(alpha: 0.7)),
+        ),
+      );
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
@@ -1212,45 +1220,64 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
           onPressed: () => _pickImage(ImageSource.camera),
           icon: const Icon(Icons.camera_alt),
           label: const Text('Capture'),
+          style: FilledButton.styleFrom(
+            backgroundColor: _accent,
+            foregroundColor: Colors.white,
+          ),
         ),
         OutlinedButton.icon(
           onPressed: _pickMultipleFromGallery,
           icon: const Icon(Icons.photo_library),
           label: const Text('Choose from Gallery'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _accent,
+            side: BorderSide(color: _accent.withValues(alpha: 0.4)),
+          ),
         ),
         OutlinedButton.icon(
           onPressed: _captureLocation,
           icon: const Icon(Icons.location_searching),
           label: const Text('Refresh Location'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _accent,
+            side: BorderSide(color: _accent.withValues(alpha: 0.4)),
+          ),
         ),
         OutlinedButton.icon(
           onPressed: _chooseLocationOnMap,
           icon: const Icon(Icons.map),
           label: const Text('Choose on Map'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: _accent,
+            side: BorderSide(color: _accent.withValues(alpha: 0.4)),
+          ),
         ),
       ],
     );
   }
 
   Widget _buildPreviewCard() {
-    return Card(
+    return _buildSectionCard(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             const Text(
               'Preview Before Sending',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.bold, color: _ink),
             ),
             const SizedBox(height: 8),
-            Text('Issue: $_selectedIssue'),
+            Text('Issue: $_selectedIssue', style: const TextStyle(color: _ink)),
             const SizedBox(height: 6),
-            Text('Timestamp: $_timeText'),
+            Text('Timestamp: $_timeText', style: const TextStyle(color: _ink)),
             const SizedBox(height: 6),
-            Text('Location: $_locationText'),
+            Text('Location: $_locationText', style: const TextStyle(color: _ink)),
             const SizedBox(height: 6),
-            Text('Description: $_descriptionPreview'),
+            Text(
+              'Description: $_descriptionPreview',
+              style: const TextStyle(color: _ink),
+            ),
           ],
         ),
       ),
@@ -1259,15 +1286,15 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
   Widget _buildLastSentPayload() {
     if (_lastSentJson == null) return const SizedBox.shrink();
-    return Card(
+    return _buildSectionCard(
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             const Text(
               'Last Sent JSON Payload',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(fontWeight: FontWeight.bold, color: _ink),
             ),
             const SizedBox(height: 8),
             SingleChildScrollView(
@@ -1283,88 +1310,252 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     );
   }
 
+  Widget _buildHeaderCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: <Color>[Color(0xFFE6F4F1), Color(0xFFF8F3E7)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Container(
+                height: 46,
+                width: 46,
+                decoration: BoxDecoration(
+                  color: _accent.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.edit_note, color: _accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Create a New Issue Report',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: _ink,
+                      ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Add photos, choose a location, and describe the issue so the authority can act quickly.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: _ink.withValues(alpha: 0.75),
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionCard({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _accent.withValues(alpha: 0.08)),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Civic Issue Reporter')),
+      appBar: AppBar(
+        title: const Text('Civic Issue Reporter'),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        elevation: 0,
+      ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(
-                'Capture civic issue details, review preview, then send JSON to desktop authority server.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              const SizedBox(height: 16),
-              Container(
-                height: 220,
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade400),
-                ),
-                child: _buildImagePreview(),
-              ),
-              const SizedBox(height: 12),
-              Text('Selected ${_selectedImages.length}/$_maxImages images'),
-              const SizedBox(height: 8),
-              _buildActionButtons(),
-              const SizedBox(height: 20),
-              DropdownButtonFormField<String>(
-                initialValue: _selectedIssue,
-                decoration: const InputDecoration(
-                  labelText: 'Issue Category',
-                  border: OutlineInputBorder(),
-                ),
-                items: _issueTypes
-                    .map(
-                      (String issue) => DropdownMenuItem<String>(
-                        value: issue,
-                        child: Text(issue),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (String? value) {
-                  if (value == null) return;
-                  setState(() {
-                    _selectedIssue = value;
-                  });
-                },
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _descriptionController,
-                maxLines: 4,
-                onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Problem Description',
-                  hintText: 'Describe the issue in detail...',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildPreviewCard(),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _isSubmitting ? null : _submitComplaint,
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Send Complaint JSON to Authority'),
-                ),
-              ),
-              if (_lastSentJson != null) ...<Widget>[
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: <Color>[Color(0xFFF8FBFA), Color(0xFFFDF6EE)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                _buildHeaderCard(),
                 const SizedBox(height: 16),
-                _buildLastSentPayload(),
+                _buildSectionCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text(
+                          'Issue Photos',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _ink,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          height: 220,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            color: _cardTint,
+                            border: Border.all(
+                              color: _accent.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: _buildImagePreview(),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Selected ${_selectedImages.length}/$_maxImages images',
+                          style: TextStyle(
+                            color: _ink.withValues(alpha: 0.7),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        _buildActionButtons(),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildSectionCard(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        const Text(
+                          'Issue Details',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _ink,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          initialValue: _selectedIssue,
+                          decoration: InputDecoration(
+                            labelText: 'Issue Category',
+                            filled: true,
+                            fillColor: Colors.white,
+                            labelStyle: const TextStyle(color: _ink),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: _accent.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: _accent.withValues(alpha: 0.25),
+                              ),
+                            ),
+                          ),
+                          items: _issueTypes
+                              .map(
+                                (String issue) => DropdownMenuItem<String>(
+                                  value: issue,
+                                  child: Text(issue),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (String? value) {
+                            if (value == null) return;
+                            setState(() {
+                              _selectedIssue = value;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        TextField(
+                          controller: _descriptionController,
+                          maxLines: 4,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            labelText: 'Problem Description',
+                            hintText: 'Describe the issue in detail...',
+                            filled: true,
+                            fillColor: Colors.white,
+                            labelStyle: const TextStyle(color: _ink),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: _accent.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: _accent.withValues(alpha: 0.25),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildPreviewCard(),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _isSubmitting ? null : _submitComplaint,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Send Complaint JSON to Authority'),
+                  ),
+                ),
+                if (_lastSentJson != null) ...<Widget>[
+                  const SizedBox(height: 16),
+                  _buildLastSentPayload(),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
