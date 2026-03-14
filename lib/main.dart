@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -40,7 +41,176 @@ class CivicIssueApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: const FrontPageScreen(),
+      home: const _AuthGate(),
+    );
+  }
+}
+
+class _AuthGate extends StatelessWidget {
+  const _AuthGate();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (BuildContext context, AsyncSnapshot<User?> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Text('Auth error: ${snapshot.error}'),
+            ),
+          );
+        }
+        final User? user = snapshot.data;
+        if (user == null) {
+          return const LoginScreen();
+        }
+        return const FrontPageScreen();
+      },
+    );
+  }
+}
+
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _isRegisterMode = false;
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final String email = _emailController.text.trim();
+    final String password = _passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      _showMessage('Please enter email and password.');
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      if (_isRegisterMode) {
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } else {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      _showMessage(e.message ?? 'Authentication failed.');
+    } catch (e) {
+      _showMessage('Authentication failed: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                const Icon(Icons.account_circle, size: 80, color: Colors.blue),
+                const SizedBox(height: 12),
+                Text(
+                  _isRegisterMode ? 'Create an account' : 'Welcome back',
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Password',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _isSubmitting ? null : _submit,
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(_isRegisterMode ? 'Sign Up' : 'Sign In'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextButton(
+                  onPressed: _isSubmitting
+                      ? null
+                      : () {
+                          setState(() {
+                            _isRegisterMode = !_isRegisterMode;
+                          });
+                        },
+                  child: Text(
+                    _isRegisterMode
+                        ? 'Already have an account? Sign in'
+                        : 'No account yet? Create one',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -249,9 +419,17 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
 
   Future<void> _loadReports() async {
     try {
+      final User? user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        if (mounted) {
+          _showSnack('Please sign in to view your reports.');
+        }
+        return;
+      }
       final QuerySnapshot<Map<String, dynamic>> snapshot =
           await FirebaseFirestore.instance
               .collection('reports')
+              .where('userId', isEqualTo: user.uid)
               .orderBy('timestamp', descending: true)
               .get();
 
@@ -590,75 +768,123 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                 const SizedBox(height: 16),
                 _buildStatsRow(),
                 const SizedBox(height: 18),
-                Row(
-                  children: <Widget>[
-                    const Icon(Icons.history, size: 18, color: _ink),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Previous Records',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _ink,
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${_reports.length} total',
-                      style: TextStyle(
-                        color: _ink.withValues(alpha: 0.6),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                if (_reports.isEmpty)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      color: Colors.white,
-                      border: Border.all(
-                        color: _accent.withValues(alpha: 0.15),
-                      ),
-                    ),
-                    child: Row(
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseAuth.instance.currentUser == null
+                      ? const Stream<QuerySnapshot<Map<String, dynamic>>>.empty()
+                      : FirebaseFirestore.instance
+                          .collection('reports')
+                          .where(
+                            'userId',
+                            isEqualTo:
+                                FirebaseAuth.instance.currentUser!.uid,
+                          )
+                          .orderBy('timestamp', descending: true)
+                          .snapshots(),
+                  builder: (
+                    BuildContext context,
+                    AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
+                  ) {
+                    final User? user = FirebaseAuth.instance.currentUser;
+                    if (user == null) {
+                      return const Text(
+                        'Please sign in to view your reports.',
+                      );
+                    }
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: CircularProgressIndicator(),
+                        ),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return Text(
+                        'Failed to load reports: ${snapshot.error}',
+                      );
+                    }
+
+                    final List<QueryDocumentSnapshot<Map<String, dynamic>>>
+                        docs = snapshot.data?.docs ??
+                            <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Container(
-                          height: 42,
-                          width: 42,
-                          decoration: BoxDecoration(
-                            color: _accent.withValues(alpha: 0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.inbox, color: _accent),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Text(
-                            'No records yet. Submit your first issue report.',
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Column(
-                    children: _reports
-                        .asMap()
-                        .entries
-                        .map(
-                          (MapEntry<int, StoredReport> entry) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _buildRecordCard(
-                              entry.value.record,
-                              entry.key,
+                        Row(
+                          children: <Widget>[
+                            const Icon(Icons.history, size: 18, color: _ink),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Previous Records',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: _ink,
+                              ),
                             ),
+                            const Spacer(),
+                            Text(
+                              '${docs.length} total',
+                              style: TextStyle(
+                                color: _ink.withValues(alpha: 0.6),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        if (docs.isEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              color: Colors.white,
+                              border: Border.all(
+                                color: _accent.withValues(alpha: 0.15),
+                              ),
+                            ),
+                            child: Row(
+                              children: <Widget>[
+                                Container(
+                                  height: 42,
+                                  width: 42,
+                                  decoration: BoxDecoration(
+                                    color: _accent.withValues(alpha: 0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child:
+                                      const Icon(Icons.inbox, color: _accent),
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    'No records yet. Submit your first issue report.',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: docs.length,
+                            itemBuilder: (BuildContext context, int index) {
+                              final Map<String, dynamic> data =
+                                  docs[index].data();
+                              final IssueRecord record =
+                                  IssueRecord.fromFirestore(data);
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: _buildRecordCard(record, index),
+                              );
+                            },
                           ),
-                        )
-                        .toList(),
-                  ),
+                      ],
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -1020,14 +1246,16 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
   // Payload + submission
   Future<Map<String, dynamic>> _buildFirestorePayload(
-    String description,
-  ) async {
+    String description, {
+    required String userId,
+  }) async {
     final DateTime reportTime = _capturedAt ?? DateTime.now();
     return <String, dynamic>{
       'issueType': _selectedIssue,
       'description': description,
       'timestamp': Timestamp.fromDate(reportTime),
       'timestampDisplay': DateFormat('dd MMM yyyy, hh:mm a').format(reportTime),
+      'userId': userId,
       'location': _selectedLocation == null
           ? null
           : <String, dynamic>{
@@ -1042,6 +1270,11 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
   Future<void> _submitComplaint() async {
     final String trimmedDescription = _descriptionController.text.trim();
+    final User? user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _showMessage('Please sign in before submitting a report.');
+      return;
+    }
 
     if (_selectedImages.isEmpty) {
       _showMessage('Please upload at least one photo of the issue.');
@@ -1066,6 +1299,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       }
       final Map<String, dynamic> payload = await _buildFirestorePayload(
         trimmedDescription,
+        userId: user.uid,
       );
       final String payloadJson = const JsonEncoder.withIndent(
         '  ',
