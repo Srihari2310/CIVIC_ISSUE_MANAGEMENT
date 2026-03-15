@@ -61,9 +61,7 @@ class _AuthGate extends StatelessWidget {
         }
         if (snapshot.hasError) {
           return Scaffold(
-            body: Center(
-              child: Text('Auth error: ${snapshot.error}'),
-            ),
+            body: Center(child: Text('Auth error: ${snapshot.error}')),
           );
         }
         final User? user = snapshot.data;
@@ -136,9 +134,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -156,8 +154,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 Text(
                   _isRegisterMode ? 'Create an account' : 'Welcome back',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 TextField(
@@ -308,13 +306,98 @@ class IssueRecord {
       status: data['status'] as String? ?? 'submitted_to_firestore',
     );
   }
+
+  static List<String> _parseImageUrls(dynamic raw) {
+    if (raw is List) {
+      return raw.whereType<String>().toList();
+    }
+    return <String>[];
+  }
 }
 
-List<String> _parseImageUrls(dynamic raw) {
-  if (raw is List) {
-    return raw.whereType<String>().toList();
+IconData _issueIconData(String issueType) {
+  switch (issueType) {
+    case 'Overflowing Dustbins':
+      return Icons.delete_outline;
+    case 'Potholes':
+      return Icons.construction;
+    case 'Dark Streetlights':
+      return Icons.lightbulb_outline;
+    case 'Garbage Dumps':
+      return Icons.delete_sweep;
+    case 'Water Main Leaks':
+      return Icons.water_drop;
+    case 'Sewage Overflow':
+      return Icons.warning_amber;
+    case 'Dead Animal Disposal':
+      return Icons.pets;
+    case 'Debris/Construction Waste':
+      return Icons.factory;
+    case 'Clogged Storm Drains':
+      return Icons.water_damage;
+    case 'Broken Pavements':
+      return Icons.square_foot;
+    case 'Open Manholes':
+      return Icons.report_problem;
+    case 'Damaged Street Signs':
+      return Icons.signpost;
+    case 'Hanging Wires':
+      return Icons.electrical_services;
+    case 'Open Electric Boxes':
+      return Icons.electrical_services_outlined;
+    case 'Fallen Trees':
+      return Icons.park;
+    case 'Overgrown Bushes':
+      return Icons.grass;
+    case 'Footpath Encroachment':
+      return Icons.directions_walk;
+    case 'Illegal Hoardings':
+      return Icons.campaign;
+    case 'Abandoned Vehicles':
+      return Icons.directions_car_filled;
+    default:
+      return Icons.report;
   }
-  return <String>[];
+}
+
+Color _issueIconColor(String issueType) {
+  switch (issueType) {
+    case 'Overflowing Dustbins':
+    case 'Garbage Dumps':
+      return const Color(0xFF2F7F6B);
+    case 'Potholes':
+    case 'Broken Pavements':
+      return const Color(0xFF7B5E3B);
+    case 'Dark Streetlights':
+      return const Color(0xFF6B5BD2);
+    case 'Water Main Leaks':
+    case 'Clogged Storm Drains':
+      return const Color(0xFF1D7BB5);
+    case 'Sewage Overflow':
+      return const Color(0xFFB84A4A);
+    case 'Dead Animal Disposal':
+      return const Color(0xFF8A5A44);
+    case 'Debris/Construction Waste':
+      return const Color(0xFF8C6E4B);
+    case 'Open Manholes':
+      return const Color(0xFFB56A00);
+    case 'Damaged Street Signs':
+      return const Color(0xFF2C5F9E);
+    case 'Hanging Wires':
+    case 'Open Electric Boxes':
+      return const Color(0xFFB04A6F);
+    case 'Fallen Trees':
+    case 'Overgrown Bushes':
+      return const Color(0xFF2C8A4B);
+    case 'Footpath Encroachment':
+      return const Color(0xFF4E6A2A);
+    case 'Illegal Hoardings':
+      return const Color(0xFF8D2F46);
+    case 'Abandoned Vehicles':
+      return const Color(0xFF4A4A4A);
+    default:
+      return const Color(0xFF1E6B6E);
+  }
 }
 
 DateTime _parseTimestamp(dynamic raw) {
@@ -412,8 +495,8 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
   }
 
   Future<void> _initConnectivity() async {
-    final List<ConnectivityResult> result =
-        await Connectivity().checkConnectivity();
+    final List<ConnectivityResult> result = await Connectivity()
+        .checkConnectivity();
     _handleConnectivityChange(result);
   }
 
@@ -497,7 +580,11 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Widget _buildRecordCard(IssueRecord record, int index) {
+  Widget _buildRecordCard(
+    IssueRecord record,
+    int index, {
+    VoidCallback? onTap,
+  }) {
     final String formattedTime = DateFormat(
       'dd MMM yyyy, hh:mm a',
     ).format(record.timestamp);
@@ -511,89 +598,112 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
       (index % 3) / 3,
     )!;
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: <BoxShadow>[
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: ClipRRect(
+    final IconData issueIcon = _issueIconData(record.issueType);
+    final Color issueColor = _issueIconColor(record.issueType);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
-          color: Colors.white,
-          child: Row(
-            children: <Widget>[
-              Container(width: 6, color: stripeColor),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Text(
-                              record.issueType,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: _ink,
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _cardTint,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              record.status.replaceAll('_', ' '),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: _accent,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        record.description,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _ink),
-                      ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 6,
-                        children: <Widget>[
-                          _InfoPill(icon: Icons.schedule, label: formattedTime),
-                          _InfoPill(
-                            icon: Icons.photo,
-                            label: '${record.imageCount} images',
-                          ),
-                          _InfoPill(icon: Icons.place, label: locationText),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              color: Colors.white,
+              child: Row(
+                children: <Widget>[
+                  Container(width: 6, color: stripeColor),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            children: <Widget>[
+                              Expanded(
+                                child: Text(
+                                  record.issueType,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: _ink,
+                                  ),
+                                ),
+                              ),
+                              Icon(issueIcon, color: issueColor, size: 18),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _cardTint,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  record.status.replaceAll('_', ' '),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: _accent,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            record.description,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: _ink),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 6,
+                            children: <Widget>[
+                              _InfoPill(
+                                icon: Icons.schedule,
+                                label: formattedTime,
+                              ),
+                              _InfoPill(
+                                icon: Icons.photo,
+                                label: '${record.imageCount} images',
+                              ),
+                              _InfoPill(icon: Icons.place, label: locationText),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _openReportDetail(IssueRecord record) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => ReportDetailScreen(record: record),
       ),
     );
   }
@@ -746,63 +856,6 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     );
   }
 
-  Future<void> _showAccountSheet() async {
-    final User? user = FirebaseAuth.instance.currentUser;
-    final String email = user?.email ?? 'Unknown email';
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (BuildContext context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  const CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Color(0xFF1976D2),
-                    child: Icon(Icons.person, color: Colors.white),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      email,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    Navigator.of(context).pop();
-                    await FirebaseAuth.instance.signOut();
-                    if (!mounted) return;
-                    _showSnack('Signed out. Please sign in again.');
-                  },
-                  icon: const Icon(Icons.logout),
-                  label: const Text('Log out'),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -811,13 +864,6 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
         elevation: 0,
-        actions: <Widget>[
-          IconButton(
-            tooltip: 'Account',
-            icon: const Icon(Icons.account_circle_outlined),
-            onPressed: _showAccountSheet,
-          ),
-        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewReport,
@@ -848,120 +894,135 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                 const SizedBox(height: 18),
                 StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: FirebaseAuth.instance.currentUser == null
-                      ? const Stream<QuerySnapshot<Map<String, dynamic>>>.empty()
+                      ? const Stream<
+                          QuerySnapshot<Map<String, dynamic>>
+                        >.empty()
                       : FirebaseFirestore.instance
-                          .collection('reports')
-                          .where(
-                            'userId',
-                            isEqualTo:
-                                FirebaseAuth.instance.currentUser!.uid,
-                          )
-                          .orderBy('timestamp', descending: true)
-                          .snapshots(),
-                  builder: (
-                    BuildContext context,
-                    AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
-                  ) {
-                    final User? user = FirebaseAuth.instance.currentUser;
-                    if (user == null) {
-                      return const Text(
-                        'Please sign in to view your reports.',
-                      );
-                    }
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: CircularProgressIndicator(),
-                        ),
-                      );
-                    }
-                    if (snapshot.hasError) {
-                      return Text(
-                        'Failed to load reports: ${snapshot.error}',
-                      );
-                    }
+                            .collection('reports')
+                            .where(
+                              'userId',
+                              isEqualTo: FirebaseAuth.instance.currentUser!.uid,
+                            )
+                            .orderBy('timestamp', descending: true)
+                            .snapshots(),
+                  builder:
+                      (
+                        BuildContext context,
+                        AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>>
+                        snapshot,
+                      ) {
+                        final User? user = FirebaseAuth.instance.currentUser;
+                        if (user == null) {
+                          return const Text(
+                            'Please sign in to view your reports.',
+                          );
+                        }
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              child: CircularProgressIndicator(),
+                            ),
+                          );
+                        }
+                        if (snapshot.hasError) {
+                          return Text(
+                            'Failed to load reports: ${snapshot.error}',
+                          );
+                        }
 
-                    final List<QueryDocumentSnapshot<Map<String, dynamic>>>
-                        docs = snapshot.data?.docs ??
+                        final List<QueryDocumentSnapshot<Map<String, dynamic>>>
+                        docs =
+                            snapshot.data?.docs ??
                             <QueryDocumentSnapshot<Map<String, dynamic>>>[];
 
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
-                            const Icon(Icons.history, size: 18, color: _ink),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Previous Records',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: _ink,
-                              ),
-                            ),
-                            const Spacer(),
-                            Text(
-                              '${docs.length} total',
-                              style: TextStyle(
-                                color: _ink.withValues(alpha: 0.6),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        if (docs.isEmpty)
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(14),
-                              color: Colors.white,
-                              border: Border.all(
-                                color: _accent.withValues(alpha: 0.15),
-                              ),
-                            ),
-                            child: Row(
+                            Row(
                               children: <Widget>[
-                                Container(
-                                  height: 42,
-                                  width: 42,
-                                  decoration: BoxDecoration(
-                                    color: _accent.withValues(alpha: 0.1),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child:
-                                      const Icon(Icons.inbox, color: _accent),
+                                const Icon(
+                                  Icons.history,
+                                  size: 18,
+                                  color: _ink,
                                 ),
-                                const SizedBox(width: 12),
-                                const Expanded(
-                                  child: Text(
-                                    'No records yet. Submit your first issue report.',
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Previous Records',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: _ink,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '${docs.length} total',
+                                  style: TextStyle(
+                                    color: _ink.withValues(alpha: 0.6),
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ],
                             ),
-                          )
-                        else
-                          ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: docs.length,
-                            itemBuilder: (BuildContext context, int index) {
-                              final Map<String, dynamic> data =
-                                  docs[index].data();
-                              final IssueRecord record =
-                                  IssueRecord.fromFirestore(data);
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: _buildRecordCard(record, index),
-                              );
-                            },
-                          ),
-                      ],
-                    );
-                  },
+                            const SizedBox(height: 10),
+                            if (docs.isEmpty)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(14),
+                                  color: Colors.white,
+                                  border: Border.all(
+                                    color: _accent.withValues(alpha: 0.15),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: <Widget>[
+                                    Container(
+                                      height: 42,
+                                      width: 42,
+                                      decoration: BoxDecoration(
+                                        color: _accent.withValues(alpha: 0.1),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.inbox,
+                                        color: _accent,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    const Expanded(
+                                      child: Text(
+                                        'No records yet. Submit your first issue report.',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              ListView.builder(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: docs.length,
+                                itemBuilder: (BuildContext context, int index) {
+                                  final Map<String, dynamic> data = docs[index]
+                                      .data();
+                                  final IssueRecord record =
+                                      IssueRecord.fromFirestore(data);
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: _buildRecordCard(
+                                      record,
+                                      index,
+                                      onTap: () => _openReportDetail(record),
+                                    ),
+                                  );
+                                },
+                              ),
+                          ],
+                        );
+                      },
                 ),
               ],
             ),
@@ -1073,6 +1134,544 @@ class _InfoPill extends StatelessWidget {
   }
 }
 
+class ReportDetailScreen extends StatefulWidget {
+  const ReportDetailScreen({super.key, required this.record});
+
+  final IssueRecord record;
+
+  @override
+  State<ReportDetailScreen> createState() => _ReportDetailScreenState();
+}
+
+class _ReportDetailScreenState extends State<ReportDetailScreen> {
+  static const Color _ink = Color(0xFF10223A);
+  static const Color _accent = Color(0xFF1E6B6E);
+  static const Color _cardTint = Color(0xFFF3F7F6);
+  static const String _userAgent = 'civic_issue_management/0.1.0';
+
+  String? _locationTitle;
+  String? _locationSubtitle;
+  bool _isLoadingLocation = false;
+  int _activeImageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocationLabel();
+  }
+
+  Future<void> _loadLocationLabel() async {
+    final IssueLocation? location = widget.record.location;
+    if (location == null) return;
+
+    setState(() {
+      _isLoadingLocation = true;
+    });
+
+    try {
+      final _LocationLabel? label = await _reverseGeocode(location);
+      if (!mounted) return;
+      setState(() {
+        _locationTitle = label?.title;
+        _locationSubtitle = label?.subtitle;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _locationTitle = null;
+        _locationSubtitle = null;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingLocation = false;
+        });
+      }
+    }
+  }
+
+  Future<_LocationLabel?> _reverseGeocode(IssueLocation location) async {
+    final Uri uri = Uri.parse(
+      'https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&lat=${location.latitude}&lon=${location.longitude}',
+    );
+    final http.Response response = await http.get(
+      uri,
+      headers: <String, String>{
+        'User-Agent': _userAgent,
+        'Accept': 'application/json',
+      },
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      return null;
+    }
+
+    final Map<String, dynamic> data =
+        jsonDecode(response.body) as Map<String, dynamic>;
+    final Map<String, dynamic>? address =
+        data['address'] as Map<String, dynamic>?;
+    final String? displayName = data['display_name'] as String?;
+
+    String? pickValue(Map<String, dynamic>? address, List<String> keys) {
+      if (address == null) return null;
+      for (final String key in keys) {
+        final String? value = address[key] as String?;
+        if (value != null && value.trim().isNotEmpty) return value;
+      }
+      return null;
+    }
+
+    final String? area = pickValue(address, <String>[
+      'neighbourhood',
+      'suburb',
+      'quarter',
+      'city_district',
+      'road',
+      'hamlet',
+      'village',
+    ]);
+    final String? city = pickValue(address, <String>[
+      'city',
+      'town',
+      'village',
+      'county',
+    ]);
+    final String? state = pickValue(address, <String>['state']);
+    final String? country = pickValue(address, <String>['country']);
+    final String? amenity = pickValue(address, <String>[
+      'amenity',
+      'tourism',
+      'shop',
+      'landmark',
+    ]);
+    final String? road = pickValue(address, <String>['road']);
+
+    final List<String> titleParts = <String>[];
+    if (area != null) titleParts.add(area);
+    if (city != null && city != area) titleParts.add(city);
+    if (state != null) titleParts.add(state);
+    if (country != null && (titleParts.isEmpty || country != state)) {
+      titleParts.add(country);
+    }
+
+    final String title =
+        titleParts.isEmpty ? (displayName ?? 'Pinned location') : titleParts
+            .join(', ');
+
+    final List<String> nearby = <String>[];
+    if (amenity != null) nearby.add(amenity);
+    if (road != null && road != amenity) nearby.add(road);
+    if (area != null && area != road && area != amenity) nearby.add(area);
+
+    String? subtitle;
+    if (nearby.isNotEmpty) {
+      subtitle = 'Nearby: ${nearby.take(2).join(', ')}';
+    } else if (displayName != null && displayName != title) {
+      subtitle = displayName;
+    }
+
+    return _LocationLabel(title: title, subtitle: subtitle);
+  }
+
+  Widget _buildSectionCard({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildImageGallery() {
+    final List<String> images = widget.record.imageUrls;
+    if (images.isEmpty) {
+      return Container(
+        height: 220,
+        decoration: BoxDecoration(
+          color: _cardTint,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _accent.withValues(alpha: 0.2)),
+        ),
+        child: const Center(
+          child: Icon(Icons.photo, size: 36, color: _accent),
+        ),
+      );
+    }
+
+    return Column(
+      children: <Widget>[
+        SizedBox(
+          height: 220,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: PageView.builder(
+              itemCount: images.length,
+              onPageChanged: (int index) {
+                setState(() {
+                  _activeImageIndex = index;
+                });
+              },
+              itemBuilder: (BuildContext context, int index) {
+                return Image.network(
+                  images[index],
+                  fit: BoxFit.cover,
+                  loadingBuilder: (
+                    BuildContext context,
+                    Widget child,
+                    ImageChunkEvent? loadingProgress,
+                  ) {
+                    if (loadingProgress == null) return child;
+                    return Center(
+                      child: SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: loadingProgress.expectedTotalBytes == null
+                              ? null
+                              : loadingProgress.cumulativeBytesLoaded /
+                                    loadingProgress.expectedTotalBytes!,
+                        ),
+                      ),
+                    );
+                  },
+                  errorBuilder: (
+                    BuildContext context,
+                    Object error,
+                    StackTrace? stackTrace,
+                  ) {
+                    return const Center(
+                      child: Icon(Icons.broken_image, size: 32),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List<Widget>.generate(images.length, (int index) {
+            final bool active = index == _activeImageIndex;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              height: 6,
+              width: active ? 18 : 6,
+              decoration: BoxDecoration(
+                color: active
+                    ? _accent
+                    : _accent.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLocationCard() {
+    final IssueLocation? location = widget.record.location;
+    if (location == null) {
+      return _buildSectionCard(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: const <Widget>[
+              Icon(Icons.place, color: _accent),
+              SizedBox(width: 8),
+              Expanded(child: Text('Location not provided.')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return _buildSectionCard(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: const <Widget>[
+                Icon(Icons.place, color: _accent),
+                SizedBox(width: 8),
+                Text(
+                  'Location Details',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: _ink),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_isLoadingLocation)
+              const Text('Finding nearby area...')
+            else if (_locationTitle != null)
+              Text(
+                _locationTitle!,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: _ink,
+                ),
+              )
+            else
+              const Text('Pinned location'),
+            if (_locationSubtitle != null) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                _locationSubtitle!,
+                style: TextStyle(color: _ink.withValues(alpha: 0.7)),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Text(
+              'Lat: ${location.latitude.toStringAsFixed(5)}, '
+              'Lng: ${location.longitude.toStringAsFixed(5)}',
+              style: TextStyle(
+                color: _ink.withValues(alpha: 0.65),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: () => _openMap(location),
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 160,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Stack(
+                    children: <Widget>[
+                      FlutterMap(
+                        options: MapOptions(
+                          initialCenter: LatLng(
+                            location.latitude,
+                            location.longitude,
+                          ),
+                          initialZoom: 16,
+                          interactionOptions: const InteractionOptions(
+                            flags: InteractiveFlag.none,
+                          ),
+                        ),
+                        children: <Widget>[
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName:
+                                'com.example.civic_issue_management',
+                          ),
+                          MarkerLayer(
+                            markers: <Marker>[
+                              Marker(
+                                point: LatLng(
+                                  location.latitude,
+                                  location.longitude,
+                                ),
+                                width: 36,
+                                height: 36,
+                                child: const Icon(
+                                  Icons.location_pin,
+                                  color: Colors.red,
+                                  size: 36,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      Positioned(
+                        right: 8,
+                        top: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'Tap to open',
+                            style: TextStyle(fontSize: 11),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openMap(IssueLocation location) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) =>
+            ReportMapScreen(location: location),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final IssueRecord record = widget.record;
+    final String formattedTime = DateFormat(
+      'dd MMM yyyy, hh:mm a',
+    ).format(record.timestamp);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Record Details'),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+      ),
+      body: SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: <Color>[Color(0xFFF8FBFA), Color(0xFFFDF6EE)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: <Widget>[
+              _buildSectionCard(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        record.issueType,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: _ink,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        record.description,
+                        style: const TextStyle(color: _ink),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 6,
+                        children: <Widget>[
+                          _InfoPill(
+                            icon: Icons.schedule,
+                            label: formattedTime,
+                          ),
+                          _InfoPill(
+                            icon: Icons.photo,
+                            label: '${record.imageCount} images',
+                          ),
+                          _InfoPill(
+                            icon: Icons.info_outline,
+                            label: record.status.replaceAll('_', ' '),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildSectionCard(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      const Text(
+                        'Issue Photos',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: _ink,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      _buildImageGallery(),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildLocationCard(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocationLabel {
+  const _LocationLabel({required this.title, this.subtitle});
+
+  final String title;
+  final String? subtitle;
+}
+
+class ReportMapScreen extends StatelessWidget {
+  const ReportMapScreen({super.key, required this.location});
+
+  final IssueLocation location;
+
+  @override
+  Widget build(BuildContext context) {
+    final LatLng center = LatLng(location.latitude, location.longitude);
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Issue Location'),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+      ),
+      body: FlutterMap(
+        options: MapOptions(initialCenter: center, initialZoom: 17),
+        children: <Widget>[
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.example.civic_issue_management',
+          ),
+          MarkerLayer(
+            markers: <Marker>[
+              Marker(
+                point: center,
+                width: 48,
+                height: 48,
+                child: const Icon(
+                  Icons.location_pin,
+                  color: Colors.red,
+                  size: 44,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class ComplaintScreen extends StatefulWidget {
   const ComplaintScreen({
     super.key,
@@ -1102,30 +1701,50 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   static const Color _cardTint = Color(0xFFF3F7F6);
   static const String _cloudinaryCloudName = 'dhf0zddtq';
   static const String _cloudinaryUploadPreset = 'CIVIC_ISSUE_IMAGES';
-  static const String _cloudinaryFolder = '';
+  static const String _cloudinaryFolder = 'civic-issues';
   final TextEditingController _descriptionController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
 
   final List<String> _issueTypes = <String>[
-    'Street light malfunction',
-    'Broken road',
-    'Water leakage',
-    'Garbage overflow',
-    'Drainage blockage',
+    'Overflowing Dustbins',
+    'Potholes',
+    'Dark Streetlights',
+    'Garbage Dumps',
+    'Water Main Leaks',
+    'Sewage Overflow',
+    'Dead Animal Disposal',
+    'Debris/Construction Waste',
+    'Clogged Storm Drains',
+    'Broken Pavements',
+    'Open Manholes',
+    'Damaged Street Signs',
+    'Hanging Wires',
+    'Open Electric Boxes',
+    'Fallen Trees',
+    'Overgrown Bushes',
+    'Footpath Encroachment',
+    'Illegal Hoardings',
+    'Abandoned Vehicles',
     'Other civic issue',
   ];
 
   final List<XFile> _selectedImages = <XFile>[];
-  String _selectedIssue = 'Street light malfunction';
+  String _selectedIssue = '';
   IssueLocation? _selectedLocation;
   DateTime? _capturedAt;
   bool _isSubmitting = false;
   String? _lastSentJson;
 
   Future<bool> _isOnline() async {
-    final List<ConnectivityResult> result =
-        await Connectivity().checkConnectivity();
+    final List<ConnectivityResult> result = await Connectivity()
+        .checkConnectivity();
     return !result.contains(ConnectivityResult.none);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIssue = _issueTypes.isEmpty ? '' : _issueTypes.first;
   }
 
   @override
@@ -1263,45 +1882,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     );
   }
 
-  Future<List<String>> _uploadImagesToCloudinary(
-    List<XFile> images,
-  ) async {
-    final List<String> urls = <String>[];
-    for (final XFile image in images) {
-      final Uri uri = Uri.parse(
-        'https://api.cloudinary.com/v1_1/$_cloudinaryCloudName/image/upload',
-      );
-      final http.MultipartRequest request = http.MultipartRequest('POST', uri);
-      request.fields['upload_preset'] = _cloudinaryUploadPreset;
-      if (_cloudinaryFolder.isNotEmpty) {
-        request.fields['folder'] = _cloudinaryFolder;
-      }
-      request.files.add(
-        await http.MultipartFile.fromPath(
-          'file',
-          image.path,
-          filename: path.basename(image.path),
-        ),
-      );
-
-      final http.StreamedResponse response = await request.send();
-      final String body = await response.stream.bytesToString();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception(
-          'Cloudinary upload failed (${response.statusCode}).',
-        );
-      }
-      final Map<String, dynamic> payload =
-          jsonDecode(body) as Map<String, dynamic>;
-      final String? secureUrl = payload['secure_url'] as String?;
-      if (secureUrl == null || secureUrl.isEmpty) {
-        throw Exception('Cloudinary response missing secure_url.');
-      }
-      urls.add(secureUrl);
-    }
-    return urls;
-  }
-
   void _removeImageAt(int index) {
     setState(() {
       _selectedImages.removeAt(index);
@@ -1384,10 +1964,46 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               'longitude': _selectedLocation!.longitude,
             },
       'imageUrls': imageUrls,
-      'imageCount': imageUrls.length,
+      'imageCount': _selectedImages.length,
       'status': 'submitted_to_firestore',
       'source': 'flutter_mobile_app',
     };
+  }
+
+  Future<String> _uploadToCloudinary(XFile image) async {
+    final Uri endpoint = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudinaryCloudName/image/upload',
+    );
+    final http.MultipartRequest request = http.MultipartRequest(
+      'POST',
+      endpoint,
+    );
+    request.fields['upload_preset'] = _cloudinaryUploadPreset;
+    request.fields['folder'] = _cloudinaryFolder;
+    request.fields['tags'] = 'civic_issue';
+    request.files.add(await http.MultipartFile.fromPath('file', image.path));
+
+    final http.StreamedResponse response = await request.send();
+    final String body = await response.stream.bytesToString();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Cloudinary upload failed (${response.statusCode}).');
+    }
+    final Map<String, dynamic> data =
+        jsonDecode(body) as Map<String, dynamic>;
+    final String? secureUrl = data['secure_url'] as String?;
+    if (secureUrl == null || secureUrl.isEmpty) {
+      throw Exception('Cloudinary upload response missing secure_url.');
+    }
+    return secureUrl;
+  }
+
+  Future<List<String>> _uploadSelectedImages() async {
+    final List<String> urls = <String>[];
+    for (final XFile image in _selectedImages) {
+      final String url = await _uploadToCloudinary(image);
+      urls.add(url);
+    }
+    return urls;
   }
 
   Future<void> _submitComplaint() async {
@@ -1414,16 +2030,20 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
     try {
       final bool online = await _isOnline();
-      if (!online && mounted) {
+      if (!online) {
         _showMessage(
-          'Internet is required to upload photos. Please try again online.',
+          'Device is offline. Please reconnect to upload photos.',
         );
         return;
       }
 
-      final List<String> imageUrls =
-          await _uploadImagesToCloudinary(_selectedImages);
+      if (_cloudinaryCloudName == 'YOUR_CLOUD_NAME' ||
+          _cloudinaryUploadPreset == 'YOUR_UNSIGNED_UPLOAD_PRESET') {
+        _showMessage('Set Cloudinary cloud name and upload preset first.');
+        return;
+      }
 
+      final List<String> imageUrls = await _uploadSelectedImages();
       final Map<String, dynamic> payload = await _buildFirestorePayload(
         trimmedDescription,
         userId: user.uid,
@@ -1453,7 +2073,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               timestamp: _capturedAt ?? DateTime.now(),
               location: _selectedLocation,
               imageUrls: imageUrls,
-              imageCount: imageUrls.length,
+              imageCount: _selectedImages.length,
               status: 'submitted_to_firestore',
             ),
             payloadJson: payloadJson,
@@ -1832,7 +2452,29 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                               .map(
                                 (String issue) => DropdownMenuItem<String>(
                                   value: issue,
-                                  child: Text(issue),
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 240,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: <Widget>[
+                                        Icon(
+                                          _issueIconData(issue),
+                                          color: _issueIconColor(issue),
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Flexible(
+                                          fit: FlexFit.loose,
+                                          child: Text(
+                                            issue,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
                               )
                               .toList(),
