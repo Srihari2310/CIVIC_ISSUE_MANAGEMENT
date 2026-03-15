@@ -221,6 +221,7 @@ class IssueRecord {
     required this.description,
     required this.timestamp,
     required this.location,
+    required this.imageUrls,
     required this.imageCount,
     required this.status,
   });
@@ -229,6 +230,7 @@ class IssueRecord {
   final String description;
   final DateTime timestamp;
   final IssueLocation? location;
+  final List<String> imageUrls;
   final int imageCount;
   final String status;
 
@@ -243,6 +245,7 @@ class IssueRecord {
               'latitude': location!.latitude,
               'longitude': location!.longitude,
             },
+      'imageUrls': imageUrls,
       'imageCount': imageCount,
       'status': status,
     };
@@ -259,6 +262,7 @@ class IssueRecord {
               'latitude': location!.latitude,
               'longitude': location!.longitude,
             },
+      'imageUrls': imageUrls,
       'imageCount': imageCount,
       'status': status,
     };
@@ -279,6 +283,7 @@ class IssueRecord {
               latitude: (locationJson['latitude'] as num?)?.toDouble() ?? 0,
               longitude: (locationJson['longitude'] as num?)?.toDouble() ?? 0,
             ),
+      imageUrls: _parseImageUrls(json['imageUrls']),
       imageCount: (json['imageCount'] as num?)?.toInt() ?? 0,
       status: json['status'] as String? ?? 'submitted_to_firestore',
     );
@@ -298,10 +303,18 @@ class IssueRecord {
               latitude: (locationJson['latitude'] as num?)?.toDouble() ?? 0,
               longitude: (locationJson['longitude'] as num?)?.toDouble() ?? 0,
             ),
+      imageUrls: _parseImageUrls(data['imageUrls']),
       imageCount: (data['imageCount'] as num?)?.toInt() ?? 0,
       status: data['status'] as String? ?? 'submitted_to_firestore',
     );
   }
+}
+
+List<String> _parseImageUrls(dynamic raw) {
+  if (raw is List) {
+    return raw.whereType<String>().toList();
+  }
+  return <String>[];
 }
 
 DateTime _parseTimestamp(dynamic raw) {
@@ -328,6 +341,7 @@ Map<String, dynamic> _firestorePayloadFromRecord(IssueRecord record) {
             'latitude': record.location!.latitude,
             'longitude': record.location!.longitude,
           },
+    'imageUrls': record.imageUrls,
     'imageCount': record.imageCount,
     'status': record.status,
     'source': 'flutter_mobile_app',
@@ -732,6 +746,63 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     );
   }
 
+  Future<void> _showAccountSheet() async {
+    final User? user = FirebaseAuth.instance.currentUser;
+    final String email = user?.email ?? 'Unknown email';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (BuildContext context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  const CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Color(0xFF1976D2),
+                    child: Icon(Icons.person, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      email,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    Navigator.of(context).pop();
+                    await FirebaseAuth.instance.signOut();
+                    if (!mounted) return;
+                    _showSnack('Signed out. Please sign in again.');
+                  },
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Log out'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -740,6 +811,13 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
         elevation: 0,
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Account',
+            icon: const Icon(Icons.account_circle_outlined),
+            onPressed: _showAccountSheet,
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewReport,
@@ -1022,6 +1100,9 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   static const Color _ink = Color(0xFF10223A);
   static const Color _accent = Color(0xFF1E6B6E);
   static const Color _cardTint = Color(0xFFF3F7F6);
+  static const String _cloudinaryCloudName = 'dhf0zddtq';
+  static const String _cloudinaryUploadPreset = 'CIVIC_ISSUE_IMAGES';
+  static const String _cloudinaryFolder = '';
   final TextEditingController _descriptionController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
 
@@ -1182,6 +1263,45 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     );
   }
 
+  Future<List<String>> _uploadImagesToCloudinary(
+    List<XFile> images,
+  ) async {
+    final List<String> urls = <String>[];
+    for (final XFile image in images) {
+      final Uri uri = Uri.parse(
+        'https://api.cloudinary.com/v1_1/$_cloudinaryCloudName/image/upload',
+      );
+      final http.MultipartRequest request = http.MultipartRequest('POST', uri);
+      request.fields['upload_preset'] = _cloudinaryUploadPreset;
+      if (_cloudinaryFolder.isNotEmpty) {
+        request.fields['folder'] = _cloudinaryFolder;
+      }
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          image.path,
+          filename: path.basename(image.path),
+        ),
+      );
+
+      final http.StreamedResponse response = await request.send();
+      final String body = await response.stream.bytesToString();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(
+          'Cloudinary upload failed (${response.statusCode}).',
+        );
+      }
+      final Map<String, dynamic> payload =
+          jsonDecode(body) as Map<String, dynamic>;
+      final String? secureUrl = payload['secure_url'] as String?;
+      if (secureUrl == null || secureUrl.isEmpty) {
+        throw Exception('Cloudinary response missing secure_url.');
+      }
+      urls.add(secureUrl);
+    }
+    return urls;
+  }
+
   void _removeImageAt(int index) {
     setState(() {
       _selectedImages.removeAt(index);
@@ -1248,6 +1368,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   Future<Map<String, dynamic>> _buildFirestorePayload(
     String description, {
     required String userId,
+    required List<String> imageUrls,
   }) async {
     final DateTime reportTime = _capturedAt ?? DateTime.now();
     return <String, dynamic>{
@@ -1262,7 +1383,8 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               'latitude': _selectedLocation!.latitude,
               'longitude': _selectedLocation!.longitude,
             },
-      'imageCount': _selectedImages.length,
+      'imageUrls': imageUrls,
+      'imageCount': imageUrls.length,
       'status': 'submitted_to_firestore',
       'source': 'flutter_mobile_app',
     };
@@ -1294,12 +1416,18 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       final bool online = await _isOnline();
       if (!online && mounted) {
         _showMessage(
-          'Device is offline. Complaint will upload when connectivity returns.',
+          'Internet is required to upload photos. Please try again online.',
         );
+        return;
       }
+
+      final List<String> imageUrls =
+          await _uploadImagesToCloudinary(_selectedImages);
+
       final Map<String, dynamic> payload = await _buildFirestorePayload(
         trimmedDescription,
         userId: user.uid,
+        imageUrls: imageUrls,
       );
       final String payloadJson = const JsonEncoder.withIndent(
         '  ',
@@ -1324,7 +1452,8 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               description: trimmedDescription,
               timestamp: _capturedAt ?? DateTime.now(),
               location: _selectedLocation,
-              imageCount: _selectedImages.length,
+              imageUrls: imageUrls,
+              imageCount: imageUrls.length,
               status: 'submitted_to_firestore',
             ),
             payloadJson: payloadJson,

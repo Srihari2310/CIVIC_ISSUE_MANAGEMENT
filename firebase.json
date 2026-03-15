@@ -1,1 +1,28 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"civic-issue-reporter-c4a80","appId":"1:972922286039:android:831ba0e1967913296ae592","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"civic-issue-reporter-c4a80","configurations":{"android":"1:972922286039:android:831ba0e1967913296ae592","ios":"1:972922286039:ios:cb44856792a80a0d6ae592","macos":"1:972922286039:ios:cb44856792a80a0d6ae592","web":"1:972922286039:web:fc5744b3c7649c256ae592","windows":"1:972922286039:web:64c07ef62bb85f106ae592"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "civic-issue-reporter-c4a80",
+          "appId": "1:972922286039:android:831ba0e1967913296ae592",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "civic-issue-reporter-c4a80",
+          "configurations": {
+            "android": "1:972922286039:android:831ba0e1967913296ae592",
+            "ios": "1:972922286039:ios:cb44856792a80a0d6ae592",
+            "macos": "1:972922286039:ios:cb44856792a80a0d6ae592",
+            "web": "1:972922286039:web:fc5744b3c7649c256ae592",
+            "windows": "1:972922286039:web:64c07ef62bb85f106ae592"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "indexes": "firestore.indexes.json"
+  }
+}
