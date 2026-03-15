@@ -580,6 +580,14 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _signOut() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (error) {
+      _showSnack('Sign out failed: $error');
+    }
+  }
+
   Widget _buildRecordCard(
     IssueRecord record,
     int index, {
@@ -864,6 +872,13 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
         elevation: 0,
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'Sign out',
+            icon: const Icon(Icons.logout),
+            onPressed: _signOut,
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _openNewReport,
