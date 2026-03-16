@@ -215,6 +215,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
 class IssueRecord {
   const IssueRecord({
+    this.docId,
     required this.issueType,
     required this.description,
     required this.timestamp,
@@ -224,6 +225,7 @@ class IssueRecord {
     required this.status,
   });
 
+  final String? docId;
   final String issueType;
   final String description;
   final DateTime timestamp;
@@ -270,6 +272,7 @@ class IssueRecord {
     final Map<String, dynamic>? locationJson =
         json['location'] as Map<String, dynamic>?;
     return IssueRecord(
+      docId: json['docId'] as String?,
       issueType: json['issueType'] as String? ?? 'Unknown issue',
       description: json['description'] as String? ?? '',
       timestamp:
@@ -287,11 +290,15 @@ class IssueRecord {
     );
   }
 
-  static IssueRecord fromFirestore(Map<String, dynamic> data) {
+  static IssueRecord fromFirestore(
+    Map<String, dynamic> data, {
+    String? docId,
+  }) {
     final Map<String, dynamic>? locationJson =
         data['location'] as Map<String, dynamic>?;
     final DateTime timestamp = _parseTimestamp(data['timestamp']);
     return IssueRecord(
+      docId: docId,
       issueType: data['issueType'] as String? ?? 'Unknown issue',
       description: data['description'] as String? ?? '',
       timestamp: timestamp,
@@ -532,12 +539,18 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
 
       final List<StoredReport> loaded = snapshot.docs.map((doc) {
         final Map<String, dynamic> data = doc.data();
-        final IssueRecord record = IssueRecord.fromFirestore(data);
+        final IssueRecord record = IssueRecord.fromFirestore(
+          data,
+          docId: doc.id,
+        );
+        if (_isAcknowledgedStatus(record.status)) {
+          return null;
+        }
         final String payloadJson = const JsonEncoder.withIndent(
           '  ',
         ).convert(_firestorePayloadFromRecord(record));
         return StoredReport(record: record, payloadJson: payloadJson);
-      }).toList();
+      }).whereType<StoredReport>().toList();
 
       if (!mounted) return;
       setState(() {
@@ -580,6 +593,63 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  bool _isAcknowledgedStatus(String status) {
+    final String normalized = status.trim().toLowerCase();
+    return normalized.startsWith('acknowledged');
+  }
+
+  Future<bool> _confirmDelete(IssueRecord record) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Delete record?'),
+          content: Text(
+            'Delete "${record.issueType}"? This cannot be undone.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    return confirmed ?? false;
+  }
+
+  Future<void> _deleteReport(IssueRecord record) async {
+    if (_isAcknowledgedStatus(record.status)) {
+      _showSnack('This record was already acknowledged.');
+      return;
+    }
+    if (record.docId == null) {
+      _showSnack('Unable to delete this record.');
+      return;
+    }
+
+    final bool confirmed = await _confirmDelete(record);
+    if (!confirmed) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('reports')
+          .doc(record.docId)
+          .delete();
+      if (!mounted) return;
+      _showSnack('Record deleted.');
+      _loadReports();
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack('Failed to delete record: $error');
+    }
+  }
+
   Future<void> _signOut() async {
     try {
       await FirebaseAuth.instance.signOut();
@@ -608,6 +678,8 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
 
     final IconData issueIcon = _issueIconData(record.issueType);
     final Color issueColor = _issueIconColor(record.issueType);
+    final bool canDelete =
+        record.docId != null && !_isAcknowledgedStatus(record.status);
 
     return Material(
       color: Colors.transparent,
@@ -670,6 +742,16 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                                   ),
                                 ),
                               ),
+                              if (canDelete)
+                                IconButton(
+                                  tooltip: 'Delete record',
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: Color(0xFFE25555),
+                                    size: 20,
+                                  ),
+                                  onPressed: () => _deleteReport(record),
+                                ),
                             ],
                           ),
                           const SizedBox(height: 8),
@@ -951,6 +1033,14 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                         docs =
                             snapshot.data?.docs ??
                             <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+                        final List<
+                          QueryDocumentSnapshot<Map<String, dynamic>>
+                        > visibleDocs = docs.where((doc) {
+                          final String status =
+                              doc.data()['status'] as String? ??
+                              'submitted_to_firestore';
+                          return !_isAcknowledgedStatus(status);
+                        }).toList();
 
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -972,7 +1062,7 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                                 ),
                                 const Spacer(),
                                 Text(
-                                  '${docs.length} total',
+                                  '${visibleDocs.length} total',
                                   style: TextStyle(
                                     color: _ink.withValues(alpha: 0.6),
                                     fontWeight: FontWeight.w600,
@@ -981,7 +1071,7 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                               ],
                             ),
                             const SizedBox(height: 10),
-                            if (docs.isEmpty)
+                            if (visibleDocs.isEmpty)
                               Container(
                                 width: double.infinity,
                                 padding: const EdgeInsets.all(16),
@@ -1019,12 +1109,15 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                               ListView.builder(
                                 shrinkWrap: true,
                                 physics: const NeverScrollableScrollPhysics(),
-                                itemCount: docs.length,
+                                itemCount: visibleDocs.length,
                                 itemBuilder: (BuildContext context, int index) {
-                                  final Map<String, dynamic> data = docs[index]
-                                      .data();
+                                  final Map<String, dynamic> data =
+                                      visibleDocs[index].data();
                                   final IssueRecord record =
-                                      IssueRecord.fromFirestore(data);
+                                      IssueRecord.fromFirestore(
+                                        data,
+                                        docId: visibleDocs[index].id,
+                                      );
                                   return Padding(
                                     padding: const EdgeInsets.only(bottom: 12),
                                     child: _buildRecordCard(
