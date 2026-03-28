@@ -1,6 +1,7 @@
-import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -20,6 +21,52 @@ import 'package:path_provider/path_provider.dart';
 
 import 'firebase_options.dart';
 
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+enum NotificationType { info, success, error, uploading }
+
+void showTopNotification(String message, {NotificationType type = NotificationType.info, Widget? trailing}) {
+  final ScaffoldMessengerState? scaffold = scaffoldMessengerKey.currentState;
+  if (scaffold == null) return;
+  
+  Color bgColor = const Color(0xFF1E6B6E);
+  IconData icon = Icons.info_outline;
+  if (type == NotificationType.success) {
+    bgColor = Colors.green.shade700;
+    icon = Icons.check_circle_outline;
+  } else if (type == NotificationType.error) {
+    bgColor = Colors.red.shade700;
+    icon = Icons.error_outline;
+  } else if (type == NotificationType.uploading) {
+    bgColor = Colors.orange.shade700;
+    icon = Icons.cloud_upload_outlined;
+  }
+
+  final BuildContext? context = scaffoldMessengerKey.currentContext;
+  final double bottomMargin = context != null ? MediaQuery.sizeOf(context).height - 120 : 600;
+
+  scaffold.clearSnackBars();
+  scaffold.showSnackBar(
+    SnackBar(
+      content: Row(
+        children: <Widget>[
+          Icon(icon, color: Colors.white),
+          const SizedBox(width: 12),
+          Expanded(child: Text(message, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+          ?trailing,
+        ],
+      ),
+      backgroundColor: bgColor,
+      behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.only(bottom: bottomMargin, left: 16, right: 16),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 6,
+      duration: type == NotificationType.uploading ? const Duration(days: 1) : const Duration(seconds: 4),
+      dismissDirection: DismissDirection.up,
+    ),
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -37,6 +84,7 @@ class CivicIssueApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Civic Issue Reporting',
+      scaffoldMessengerKey: scaffoldMessengerKey,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
@@ -134,9 +182,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showTopNotification(
+      message,
+      type: message.toLowerCase().contains('failed')
+          ? NotificationType.error
+          : NotificationType.info,
+    );
   }
 
   @override
@@ -216,6 +267,7 @@ class _LoginScreenState extends State<LoginScreen> {
 class IssueRecord {
   const IssueRecord({
     this.docId,
+    this.reportId,
     required this.issueType,
     required this.description,
     required this.timestamp,
@@ -226,6 +278,7 @@ class IssueRecord {
   });
 
   final String? docId;
+  final String? reportId;
   final String issueType;
   final String description;
   final DateTime timestamp;
@@ -236,6 +289,7 @@ class IssueRecord {
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
+      'reportId': reportId,
       'issueType': issueType,
       'description': description,
       'timestamp': timestamp.toIso8601String(),
@@ -253,6 +307,7 @@ class IssueRecord {
 
   Map<String, dynamic> toFirestore() {
     return <String, dynamic>{
+      'reportId': reportId,
       'issueType': issueType,
       'description': description,
       'timestamp': Timestamp.fromDate(timestamp),
@@ -273,6 +328,7 @@ class IssueRecord {
         json['location'] as Map<String, dynamic>?;
     return IssueRecord(
       docId: json['docId'] as String?,
+      reportId: json['reportId'] as String?,
       issueType: json['issueType'] as String? ?? 'Unknown issue',
       description: json['description'] as String? ?? '',
       timestamp:
@@ -299,6 +355,7 @@ class IssueRecord {
     final DateTime timestamp = _parseTimestamp(data['timestamp']);
     return IssueRecord(
       docId: docId,
+      reportId: data['reportId'] as String?,
       issueType: data['issueType'] as String? ?? 'Unknown issue',
       description: data['description'] as String? ?? '',
       timestamp: timestamp,
@@ -419,6 +476,7 @@ DateTime _parseTimestamp(dynamic raw) {
 
 Map<String, dynamic> _firestorePayloadFromRecord(IssueRecord record) {
   return <String, dynamic>{
+    'reportId': record.reportId,
     'issueType': record.issueType,
     'description': record.description,
     'timestamp': record.timestamp.toIso8601String(),
@@ -436,15 +494,6 @@ Map<String, dynamic> _firestorePayloadFromRecord(IssueRecord record) {
     'status': record.status,
     'source': 'flutter_mobile_app',
   };
-}
-
-Map<String, dynamic> _firestorePayloadForPreview(Map<String, dynamic> payload) {
-  final Map<String, dynamic> preview = Map<String, dynamic>.from(payload);
-  final dynamic rawTimestamp = preview['timestamp'];
-  if (rawTimestamp is Timestamp) {
-    preview['timestamp'] = rawTimestamp.toDate().toIso8601String();
-  }
-  return preview;
 }
 
 class StoredReport {
@@ -565,32 +614,19 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
   }
 
   Future<void> _openNewReport() async {
-    final StoredReport? report = await Navigator.of(context).push<StoredReport>(
-      MaterialPageRoute<StoredReport>(
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
         builder: (BuildContext context) => const ComplaintScreen(
-          returnOnSuccess: true,
+          returnOnSuccess: false,
           showSuccessMessage: false,
         ),
       ),
-    );
-
-    if (report == null || !mounted) return;
-
-    setState(() {
-      _reports.insert(0, report);
-    });
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Issue report added to Firestore records.')),
     );
   }
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showTopNotification(message, type: message.toLowerCase().contains('failed') || message.toLowerCase().contains('offline') ? NotificationType.error : NotificationType.info);
   }
 
   bool _isAcknowledgedStatus(String status) {
@@ -710,18 +746,33 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Row(
-                            children: <Widget>[
-                              Expanded(
-                                child: Text(
-                                  record.issueType,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                    color: _ink,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      if (record.reportId != null)
+                                        Text(
+                                          record.reportId!,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: _ink.withValues(alpha: 0.5),
+                                          ),
+                                        ),
+                                      Text(
+                                        record.issueType,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                          color: _ink,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ),
                               Icon(issueIcon, color: issueColor, size: 18),
                               const SizedBox(width: 8),
                               Container(
@@ -1666,6 +1717,15 @@ class _ReportDetailScreenState extends State<ReportDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
+                      if (record.reportId != null)
+                        Text(
+                          record.reportId!,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: _ink.withValues(alpha: 0.5),
+                          ),
+                        ),
                       Text(
                         record.issueType,
                         style: const TextStyle(
@@ -1840,7 +1900,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   String _selectedIssue = '';
   IssueLocation? _selectedLocation;
   DateTime? _capturedAt;
-  bool _isSubmitting = false;
+  final bool _isSubmitting = false;
   String? _lastSentJson;
 
   Future<bool> _isOnline() async {
@@ -2053,31 +2113,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   }
 
   // Payload + submission
-  Future<Map<String, dynamic>> _buildFirestorePayload(
-    String description, {
-    required String userId,
-    required List<String> imageUrls,
-  }) async {
-    final DateTime reportTime = _capturedAt ?? DateTime.now();
-    return <String, dynamic>{
-      'issueType': _selectedIssue,
-      'description': description,
-      'timestamp': Timestamp.fromDate(reportTime),
-      'timestampDisplay': DateFormat('dd MMM yyyy, hh:mm a').format(reportTime),
-      'userId': userId,
-      'location': _selectedLocation == null
-          ? null
-          : <String, dynamic>{
-              'latitude': _selectedLocation!.latitude,
-              'longitude': _selectedLocation!.longitude,
-            },
-      'imageUrls': imageUrls,
-      'imageCount': _selectedImages.length,
-      'status': 'submitted_to_firestore',
-      'source': 'flutter_mobile_app',
-    };
-  }
-
   Future<String> _uploadToCloudinary(XFile image) async {
     final Uri endpoint = Uri.parse(
       'https://api.cloudinary.com/v1_1/$_cloudinaryCloudName/image/upload',
@@ -2105,15 +2140,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
     return secureUrl;
   }
 
-  Future<List<String>> _uploadSelectedImages() async {
-    final List<String> urls = <String>[];
-    for (final XFile image in _selectedImages) {
-      final String url = await _uploadToCloudinary(image);
-      urls.add(url);
-    }
-    return urls;
-  }
-
   Future<void> _submitComplaint() async {
     final String trimmedDescription = _descriptionController.text.trim();
     final User? user = FirebaseAuth.instance.currentUser;
@@ -2132,10 +2158,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       return;
     }
 
-    setState(() {
-      _isSubmitting = true;
-    });
-
     try {
       final bool online = await _isOnline();
       if (!online) {
@@ -2150,60 +2172,56 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
         _showMessage('Set Cloudinary cloud name and upload preset first.');
         return;
       }
+      
+      final List<XFile> imagesToUpload = List.from(_selectedImages);
+      final IssueLocation? location = _selectedLocation;
+      final DateTime time = _capturedAt ?? DateTime.now();
+      final String issue = _selectedIssue;
 
-      final List<String> imageUrls = await _uploadSelectedImages();
-      final Map<String, dynamic> payload = await _buildFirestorePayload(
-        trimmedDescription,
-        userId: user.uid,
-        imageUrls: imageUrls,
-      );
-      final String payloadJson = const JsonEncoder.withIndent(
-        '  ',
-      ).convert(_firestorePayloadForPreview(payload));
+      showTopNotification('Uploading report...', type: NotificationType.uploading, trailing: const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)));
+      
+      if (mounted) Navigator.of(context).pop();
 
-      setState(() {
-        _lastSentJson = payloadJson;
+      Future.microtask(() async {
+        try {
+          final List<String> imageUrls = <String>[];
+          for (final XFile image in imagesToUpload) {
+            final url = await _uploadToCloudinary(image);
+            imageUrls.add(url);
+          }
+          final String reportIdStr = 'RPT-${Random().nextInt(90000) + 10000}${String.fromCharCodes(Iterable.generate(3, (_) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.codeUnitAt(Random().nextInt(26))))}';
+          final Map<String, dynamic> payload = <String, dynamic>{
+            'reportId': reportIdStr,
+            'issueType': issue,
+            'description': trimmedDescription,
+            'timestamp': Timestamp.fromDate(time),
+            'timestampDisplay': DateFormat('dd MMM yyyy, hh:mm a').format(time),
+            'userId': user.uid,
+            'location': location == null
+                ? null
+                : <String, dynamic>{
+                    'latitude': location.latitude,
+                    'longitude': location.longitude,
+                  },
+            'imageUrls': imageUrls,
+            'imageCount': imagesToUpload.length,
+            'status': 'submitted_to_firestore',
+            'source': 'flutter_mobile_app',
+          };
+          await FirebaseFirestore.instance.collection('reports').add(payload);
+          showTopNotification('Report submitted successfully ✔', type: NotificationType.success);
+        } catch (e) {
+          showTopNotification('Failed to upload report: $e', type: NotificationType.error);
+        }
       });
-
-      await FirebaseFirestore.instance.collection('reports').add(payload);
-
-      if (!mounted) return;
-      if (widget.showSuccessMessage) {
-        _showMessage('Complaint saved to Firestore successfully.');
-      }
-
-      if (widget.returnOnSuccess && mounted) {
-        Navigator.of(context).pop(
-          StoredReport(
-            record: IssueRecord(
-              issueType: _selectedIssue,
-              description: trimmedDescription,
-              timestamp: _capturedAt ?? DateTime.now(),
-              location: _selectedLocation,
-              imageUrls: imageUrls,
-              imageCount: _selectedImages.length,
-              status: 'submitted_to_firestore',
-            ),
-            payloadJson: payloadJson,
-          ),
-        );
-      }
     } catch (error) {
-      _showMessage('Failed to save complaint: $error');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSubmitting = false;
-        });
-      }
+      _showMessage('Failed to process complaint: $error');
     }
   }
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showTopNotification(message, type: message.toLowerCase().contains('failed') || message.toLowerCase().contains('offline') ? NotificationType.error : NotificationType.info);
   }
 
   String get _locationText {
@@ -2830,9 +2848,12 @@ class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showTopNotification(
+      message,
+      type: message.toLowerCase().contains('failed') || message.toLowerCase().contains('error')
+          ? NotificationType.error
+          : NotificationType.info,
+    );
   }
 
   @override
