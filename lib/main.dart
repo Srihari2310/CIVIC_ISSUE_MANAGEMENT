@@ -2458,6 +2458,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
       Future.microtask(() async {
         try {
+          final String reportIdStr = 'RPT-${Random().nextInt(90000) + 10000}${String.fromCharCodes(Iterable.generate(3, (_) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.codeUnitAt(Random().nextInt(26))))}';
           final List<String> imageUrls = <String>[];
           if (imagesToUpload.isNotEmpty) {
             for (final XFile image in imagesToUpload) {
@@ -2465,7 +2466,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               imageUrls.add(url);
             }
           }
-          final String reportIdStr = 'RPT-${Random().nextInt(90000) + 10000}${String.fromCharCodes(Iterable.generate(3, (_) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.codeUnitAt(Random().nextInt(26))))}';
           final Map<String, dynamic> payload = <String, dynamic>{
             'reportId': reportIdStr,
             'issueType': issue,
@@ -2485,7 +2485,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
             'status': 'submitted_to_firestore',
             'source': 'flutter_mobile_app',
           };
-          await FirebaseFirestore.instance.collection('reports').add(payload);
+          await FirebaseFirestore.instance.collection('reports').doc(reportIdStr).set(payload);
           showTopNotification('Report submitted successfully ✔', type: NotificationType.success);
         } catch (e) {
           showTopNotification('Failed to upload report: $e', type: NotificationType.error);
