@@ -2,9 +2,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -22,6 +22,7 @@ import 'package:path_provider/path_provider.dart';
 import 'firebase_options.dart';
 
 final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
+bool _firestoreConfigured = false;
 
 enum NotificationType { info, success, error, uploading }
 
@@ -42,9 +43,6 @@ void showTopNotification(String message, {NotificationType type = NotificationTy
     icon = Icons.cloud_upload_outlined;
   }
 
-  final BuildContext? context = scaffoldMessengerKey.currentContext;
-  final double bottomMargin = context != null ? MediaQuery.sizeOf(context).height - 120 : 600;
-
   scaffold.clearSnackBars();
   scaffold.showSnackBar(
     SnackBar(
@@ -58,7 +56,7 @@ void showTopNotification(String message, {NotificationType type = NotificationTy
       ),
       backgroundColor: bgColor,
       behavior: SnackBarBehavior.floating,
-      margin: EdgeInsets.only(bottom: bottomMargin, left: 16, right: 16),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 6,
       duration: type == NotificationType.uploading ? const Duration(days: 1) : const Duration(seconds: 4),
@@ -69,10 +67,6 @@ void showTopNotification(String message, {NotificationType type = NotificationTy
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  FirebaseFirestore.instance.settings = const Settings(
-    persistenceEnabled: true,
-  );
   runApp(const CivicIssueApp());
 }
 
@@ -89,7 +83,50 @@ class CivicIssueApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: const _AuthGate(),
+      home: const _FirebaseGate(),
+    );
+  }
+}
+
+class _FirebaseGate extends StatefulWidget {
+  const _FirebaseGate();
+
+  @override
+  State<_FirebaseGate> createState() => _FirebaseGateState();
+}
+
+class _FirebaseGateState extends State<_FirebaseGate> {
+  late final Future<void> _initFuture = _initFirebase();
+
+  Future<void> _initFirebase() async {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    if (!_firestoreConfigured && !kIsWeb) {
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: true,
+      );
+      _firestoreConfigured = true;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _initFuture,
+      builder: (BuildContext context, AsyncSnapshot<void> snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Text('Firebase init failed: ${snapshot.error}'),
+            ),
+          );
+        }
+        return const _AuthGate();
+      },
     );
   }
 }
@@ -298,6 +335,8 @@ class IssueRecord {
           : <String, dynamic>{
               'latitude': location!.latitude,
               'longitude': location!.longitude,
+              'wardNumber': location!.wardNumber,
+              'ward': location!.wardNumber,
             },
       'imageUrls': imageUrls,
       'imageCount': imageCount,
@@ -316,6 +355,8 @@ class IssueRecord {
           : <String, dynamic>{
               'latitude': location!.latitude,
               'longitude': location!.longitude,
+              'wardNumber': location!.wardNumber,
+              'ward': location!.wardNumber,
             },
       'imageUrls': imageUrls,
       'imageCount': imageCount,
@@ -339,6 +380,7 @@ class IssueRecord {
           : IssueLocation(
               latitude: (locationJson['latitude'] as num?)?.toDouble() ?? 0,
               longitude: (locationJson['longitude'] as num?)?.toDouble() ?? 0,
+              wardNumber: (locationJson['wardNumber'] ?? locationJson['ward'])?.toString(),
             ),
       imageUrls: _parseImageUrls(json['imageUrls']),
       imageCount: (json['imageCount'] as num?)?.toInt() ?? 0,
@@ -364,6 +406,7 @@ class IssueRecord {
           : IssueLocation(
               latitude: (locationJson['latitude'] as num?)?.toDouble() ?? 0,
               longitude: (locationJson['longitude'] as num?)?.toDouble() ?? 0,
+              wardNumber: (locationJson['wardNumber'] ?? locationJson['ward'])?.toString(),
             ),
       imageUrls: _parseImageUrls(data['imageUrls']),
       imageCount: (data['imageCount'] as num?)?.toInt() ?? 0,
@@ -488,6 +531,8 @@ Map<String, dynamic> _firestorePayloadFromRecord(IssueRecord record) {
         : <String, dynamic>{
             'latitude': record.location!.latitude,
             'longitude': record.location!.longitude,
+            'wardNumber': record.location!.wardNumber,
+            'ward': record.location!.wardNumber,
           },
     'imageUrls': record.imageUrls,
     'imageCount': record.imageCount,
@@ -607,6 +652,12 @@ class _FrontPageScreenState extends State<FrontPageScreen> {
           ..clear()
           ..addAll(loaded);
       });
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+      final String message = e.code == 'failed-precondition'
+          ? 'Firestore needs a composite index for reports(userId, timestamp). Create it in Firebase Console.'
+          : 'Failed to load reports from Firestore: ${e.message ?? e.code}.';
+      _showSnack(message);
     } catch (error) {
       if (!mounted) return;
       _showSnack('Failed to load reports from Firestore: $error');
@@ -1855,10 +1906,34 @@ class ComplaintScreen extends StatefulWidget {
 }
 
 class IssueLocation {
-  const IssueLocation({required this.latitude, required this.longitude});
+  const IssueLocation({
+    required this.latitude,
+    required this.longitude,
+    this.wardNumber,
+  });
 
   final double latitude;
   final double longitude;
+  final String? wardNumber;
+}
+
+class _WardPolygon {
+  const _WardPolygon({required this.outer, required this.holes});
+
+  final List<LatLng> outer;
+  final List<List<LatLng>> holes;
+}
+
+class _WardFeature {
+  const _WardFeature({
+    required this.name,
+    required this.wardNumber,
+    required this.polygons,
+  });
+
+  final String name;
+  final String? wardNumber;
+  final List<_WardPolygon> polygons;
 }
 
 class _ComplaintScreenState extends State<ComplaintScreen> {
@@ -1899,6 +1974,10 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
   final List<XFile> _selectedImages = <XFile>[];
   String _selectedIssue = '';
   IssueLocation? _selectedLocation;
+  String? _wardName;
+  String? _wardNumber;
+  bool _isFetchingWard = false;
+  List<_WardFeature>? _wardFeatures;
   DateTime? _capturedAt;
   final bool _isSubmitting = false;
   String? _lastSentJson;
@@ -2087,8 +2166,12 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       _selectedLocation = IssueLocation(
         latitude: position.latitude,
         longitude: position.longitude,
+        wardNumber: _wardNumber,
       );
+      _wardName = null;
+      _wardNumber = null;
     });
+    await _fetchWardForSelectedLocation();
   }
 
   Future<void> _chooseLocationOnMap() async {
@@ -2109,7 +2192,194 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
 
     setState(() {
       _selectedLocation = pickedLocation;
+      _wardName = null;
+      _wardNumber = null;
     });
+    await _fetchWardForSelectedLocation();
+  }
+
+  Future<void> _fetchWardForSelectedLocation() async {
+    if (_selectedLocation == null) {
+      return;
+    }
+    if (_isFetchingWard) return;
+    setState(() {
+      _isFetchingWard = true;
+    });
+    try {
+      _wardFeatures ??= await _loadWardFeatures();
+      final IssueLocation location = _selectedLocation!;
+      final LatLng point = LatLng(location.latitude, location.longitude);
+
+      String? foundName;
+      String? foundNumber;
+      for (final _WardFeature ward in _wardFeatures!) {
+        if (_isPointInWard(point, ward)) {
+          foundName = ward.name;
+          foundNumber = ward.wardNumber;
+          break;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _wardName = foundName;
+        _wardNumber = foundNumber;
+        final IssueLocation? current = _selectedLocation;
+        if (current != null) {
+          _selectedLocation = IssueLocation(
+            latitude: current.latitude,
+            longitude: current.longitude,
+            wardNumber: foundNumber,
+          );
+        }
+      });
+
+      if (foundName == null) {
+        _showMessage('Ward not found for this location.');
+      } else {
+        _showMessage(
+          'Ward detected: ${foundNumber ?? foundName}',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingWard = false;
+        });
+      }
+    }
+  }
+
+  Future<List<_WardFeature>> _loadWardFeatures() async {
+    final String raw = await rootBundle.loadString(
+      'assets/wards/Ward_Boundary_Feb_2022.geojson',
+    );
+    final Map<String, dynamic> json =
+        jsonDecode(raw) as Map<String, dynamic>;
+    final List<dynamic> features = json['features'] as List<dynamic>? ?? const <dynamic>[];
+
+    final List<_WardFeature> wards = <_WardFeature>[];
+    for (final dynamic entry in features) {
+      if (entry is! Map<String, dynamic>) continue;
+      final Map<String, dynamic>? geometry =
+          entry['geometry'] as Map<String, dynamic>?;
+      if (geometry == null) continue;
+      final String? type = geometry['type'] as String?;
+      if (type == null) continue;
+
+      final Map<String, dynamic>? properties =
+          entry['properties'] as Map<String, dynamic>?;
+      final String name =
+          (properties?['name'] ??
+                  properties?['Name'] ??
+                  properties?['ward'] ??
+                  properties?['WARD_NAME'])
+              ?.toString()
+              .trim() ??
+          'Unknown ward';
+      final String? wardNumber = _extractWardNumber(properties);
+
+      final List<_WardPolygon> polygons = <_WardPolygon>[];
+      if (type == 'Polygon') {
+        final List<dynamic> coords = geometry['coordinates'] as List<dynamic>? ?? const <dynamic>[];
+        final _WardPolygon? polygon = _parsePolygon(coords);
+        if (polygon != null) polygons.add(polygon);
+      } else if (type == 'MultiPolygon') {
+        final List<dynamic> multi = geometry['coordinates'] as List<dynamic>? ?? const <dynamic>[];
+        for (final dynamic polyCoords in multi) {
+          if (polyCoords is! List<dynamic>) continue;
+          final _WardPolygon? polygon = _parsePolygon(polyCoords);
+          if (polygon != null) polygons.add(polygon);
+        }
+      }
+
+      if (polygons.isNotEmpty) {
+        wards.add(
+          _WardFeature(
+            name: name,
+            wardNumber: wardNumber,
+            polygons: polygons,
+          ),
+        );
+      }
+    }
+    return wards;
+  }
+
+  String? _extractWardNumber(Map<String, dynamic>? properties) {
+    if (properties == null) return null;
+    final String? direct = (properties['New_Ward_No'] ??
+            properties['new_ward_no'] ??
+            properties['ward_no'] ??
+            properties['WARD_NO'] ??
+            properties['WARD_NUMBER'])
+        ?.toString()
+        .trim();
+    if (direct != null && direct.isNotEmpty) return direct;
+    final String? description = properties['description']?.toString();
+    if (description == null || description.isEmpty) return null;
+    final RegExp match = RegExp(r'New_Ward_No\s*([0-9]+)');
+    final RegExpMatch? result = match.firstMatch(description);
+    if (result == null) return null;
+    return result.group(1);
+  }
+
+  _WardPolygon? _parsePolygon(List<dynamic> coords) {
+    if (coords.isEmpty) return null;
+    final List<LatLng> outer = _parseRing(coords.first);
+    if (outer.length < 3) return null;
+    final List<List<LatLng>> holes = <List<LatLng>>[];
+    for (int i = 1; i < coords.length; i += 1) {
+      final List<LatLng> hole = _parseRing(coords[i]);
+      if (hole.length >= 3) holes.add(hole);
+    }
+    return _WardPolygon(outer: outer, holes: holes);
+  }
+
+  List<LatLng> _parseRing(dynamic rawRing) {
+    if (rawRing is! List) return const <LatLng>[];
+    final List<LatLng> ring = <LatLng>[];
+    for (final dynamic point in rawRing) {
+      if (point is! List || point.length < 2) continue;
+      final double? lng = (point[0] as num?)?.toDouble();
+      final double? lat = (point[1] as num?)?.toDouble();
+      if (lat == null || lng == null) continue;
+      ring.add(LatLng(lat, lng));
+    }
+    return ring;
+  }
+
+  bool _isPointInWard(LatLng point, _WardFeature ward) {
+    for (final _WardPolygon polygon in ward.polygons) {
+      if (_pointInPolygon(point, polygon)) return true;
+    }
+    return false;
+  }
+
+  bool _pointInPolygon(LatLng point, _WardPolygon polygon) {
+    if (!_pointInRing(point, polygon.outer)) return false;
+    for (final List<LatLng> hole in polygon.holes) {
+      if (_pointInRing(point, hole)) return false;
+    }
+    return true;
+  }
+
+  bool _pointInRing(LatLng point, List<LatLng> ring) {
+    if (ring.length < 3) return false;
+    bool inside = false;
+    final double px = point.longitude;
+    final double py = point.latitude;
+    for (int i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      final double xi = ring[i].longitude;
+      final double yi = ring[i].latitude;
+      final double xj = ring[j].longitude;
+      final double yj = ring[j].latitude;
+      final bool intersect = ((yi > py) != (yj > py)) &&
+          (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
 
   // Payload + submission
@@ -2148,11 +2418,6 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
       return;
     }
 
-    if (_selectedImages.isEmpty) {
-      _showMessage('Please upload at least one photo of the issue.');
-      return;
-    }
-
     if (trimmedDescription.isEmpty) {
       _showMessage('Please add a description of the problem.');
       return;
@@ -2167,27 +2432,38 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
         return;
       }
 
-      if (_cloudinaryCloudName == 'YOUR_CLOUD_NAME' ||
-          _cloudinaryUploadPreset == 'YOUR_UNSIGNED_UPLOAD_PRESET') {
-        _showMessage('Set Cloudinary cloud name and upload preset first.');
-        return;
-      }
-      
       final List<XFile> imagesToUpload = List.from(_selectedImages);
       final IssueLocation? location = _selectedLocation;
       final DateTime time = _capturedAt ?? DateTime.now();
       final String issue = _selectedIssue;
 
-      showTopNotification('Uploading report...', type: NotificationType.uploading, trailing: const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)));
+      if (imagesToUpload.isNotEmpty) {
+        if (_cloudinaryCloudName == 'YOUR_CLOUD_NAME' ||
+            _cloudinaryUploadPreset == 'YOUR_UNSIGNED_UPLOAD_PRESET') {
+          _showMessage('Set Cloudinary cloud name and upload preset first.');
+          return;
+        }
+        showTopNotification(
+          'Uploading report...',
+          type: NotificationType.uploading,
+          trailing: const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+          ),
+        );
+      }
       
       if (mounted) Navigator.of(context).pop();
 
       Future.microtask(() async {
         try {
           final List<String> imageUrls = <String>[];
-          for (final XFile image in imagesToUpload) {
-            final url = await _uploadToCloudinary(image);
-            imageUrls.add(url);
+          if (imagesToUpload.isNotEmpty) {
+            for (final XFile image in imagesToUpload) {
+              final url = await _uploadToCloudinary(image);
+              imageUrls.add(url);
+            }
           }
           final String reportIdStr = 'RPT-${Random().nextInt(90000) + 10000}${String.fromCharCodes(Iterable.generate(3, (_) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.codeUnitAt(Random().nextInt(26))))}';
           final Map<String, dynamic> payload = <String, dynamic>{
@@ -2202,6 +2478,7 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
                 : <String, dynamic>{
                     'latitude': location.latitude,
                     'longitude': location.longitude,
+                    'ward': location.wardNumber,
                   },
             'imageUrls': imageUrls,
             'imageCount': imagesToUpload.length,
@@ -2363,6 +2640,14 @@ class _ComplaintScreenState extends State<ComplaintScreen> {
               style: const TextStyle(color: _ink),
             ),
             const SizedBox(height: 6),
+            if (_selectedLocation != null)
+              Text(
+                _isFetchingWard
+                    ? 'Ward: Fetching...'
+                    : 'Ward: ${_wardNumber ?? _wardName ?? 'Not found'}',
+                style: const TextStyle(color: _ink),
+              ),
+            if (_selectedLocation != null) const SizedBox(height: 6),
             Text(
               'Description: $_descriptionPreview',
               style: const TextStyle(color: _ink),
